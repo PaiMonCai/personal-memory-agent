@@ -6,10 +6,10 @@
  */
 // 版本参数必须与 index.html 中的引用一致，且同一模块在所有文件中写法必须完全相同，
 // 否则 ES module 会被当成两个不同模块加载（cloud.js 会出现两个 SDK 客户端实例）。
-import { PUBLIC_CONFIG } from './config.js?v=20260922q'
-import * as db from './cloud.js?v=20260922q'
-import { describeError } from './cloud.js?v=20260922q'
-import * as ai from './ai.js?v=20260922q'
+import { PUBLIC_CONFIG } from './config.js?v=20260922r'
+import * as db from './cloud.js?v=20260922r'
+import { describeError } from './cloud.js?v=20260922r'
+import * as ai from './ai.js?v=20260922r'
 import {
   escapeHtml,
   kindMeta,
@@ -24,14 +24,14 @@ import {
   toast,
   confirmDialog,
   debounce,
-} from './ui.js?v=20260922q'
+} from './ui.js?v=20260922r'
 import {
   applySettings,
   mountSettingsPanel,
   normalizeSettings,
   DEFAULT_SETTINGS,
-} from './settings.js?v=20260922q'
-import { initEffects, setEffect } from './effects.js?v=20260922q'
+} from './settings.js?v=20260922r'
+import { initEffects, setEffect } from './effects.js?v=20260922r'
 
 /* ==================================================================== 状态 */
 
@@ -414,7 +414,21 @@ let settingsSaveTimer = null
  */
 function cacheSettings(s) {
   try {
-    const safe = s.ai ? { ...s, ai: { ...s.ai, custom: { ...s.ai.custom, apiKey: '' } } } : s
+    // 密钥挂在供应商上，要逐家剔掉 —— 只清 custom.apiKey 的话，密钥会原样留在缓存里
+    let safe = s
+    const custom = s && s.ai && s.ai.custom
+    if (custom && Array.isArray(custom.vendors)) {
+      safe = {
+        ...s,
+        ai: {
+          ...s.ai,
+          custom: {
+            ...custom,
+            vendors: custom.vendors.map((v) => ({ ...v, apiKey: '' })),
+          },
+        },
+      }
+    }
     localStorage.setItem(SETTINGS_CACHE_KEY, JSON.stringify(safe))
   } catch {
     /* 隐私模式下写入失败，忽略 */

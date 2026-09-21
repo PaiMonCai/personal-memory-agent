@@ -266,18 +266,26 @@ check('供应商字段用 data-vendor-field 而不是旧的 data-set 路径',
 check('改地址/密钥不重画清单（重画会打断输入）',
       'constvf=e.target.closest(\'[data-vendor-field]\')' in sjs and 'commitVendors(' in sjs)
 check('回车即可添加模型', "e.key!=='Enter'" in sjs and "closest('[data-model-new]')" in sjs)
-check('删掉供应商后把焦点还给添加按钮', "data-set-act=\"add-vendor\")?.focus()" in sjs)
+check('删掉供应商后把焦点还给添加按钮',
+      'add-vendor"]\')?.focus()' in sjs)
 check('新模型名不会与已有的重复', 'if(!label||seen.has(label))returnnull' in sjs)
 check('地址尾斜杠会被去掉（拼路径不会变成 //）', r".replace(/\/+$/,'')" in sjs)
 check('调用层按供应商取地址与密钥', 'vendor.baseUrl' in ajs and 'vendor.apiKey' in ajs)
 check('调用层用解析出的模型名', 'model:model.name' in ajs)
-check('分组用发丝线而不是色块', '.vendor{border-bottom:1pxsolidvar(--line)}' in flat_css)
+check('分组用发丝线而不是色块',
+      re.search(r'\.vendor\{[^}]*border-bottom:1pxsolidvar\(--line\)', flat_css) is not None
+      and re.search(r'\.vendor\{[^}]*background:(?!none)', flat_css) is None)
 check('模型行与云服务模型列表同一套指示条', '.model-pick::before{' in flat_css)
 check('删除按钮不复用 .icon-btn（它在桌面是 display:none）',
       'class="icon-btn vendor-del"' not in sjs and 'class="icon-btn model-del"' not in sjs)
 check('删除按钮有独立样式', '.vendor-del,.model-del{' in flat_css)
 check('触屏下删除按钮放大到 44px',
       '@media(pointer:coarse){' in flat_css and '.model-del{width:44px;height:44px' in flat_css)
+# 用 opacity 压淡会把对比度拉到 2.1:1（UI 组件要 3:1）—— 只能靠已过检的文字色
+check('删除按钮不靠 opacity 压淡',
+      re.search(r'\.vendor-del,\.model-del\{[^}]*opacity', flat_css) is None)
+check('删除按钮用已过检的 --text-3',
+      re.search(r'\.vendor-del,\.model-del\{[^}]*color:var\(--text-3\)', flat_css) is not None)
 
 print()
 print('=== [O] 自定义接口的调用层 ===')

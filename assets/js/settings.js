@@ -4,8 +4,8 @@
  * 只负责"设置的数据形态 + 应用到界面 + 面板渲染"，不碰云端读写
  * （读写在 cloud.js，保存时机由 app.js 决定）。
  */
-import { escapeHtml } from './ui.js?v=20260922q'
-import { EFFECTS, CUSTOM_LIMITS } from './effects.js?v=20260922q'
+import { escapeHtml } from './ui.js?v=20260922r'
+import { EFFECTS, CUSTOM_LIMITS } from './effects.js?v=20260922r'
 
 /* ------------------------------------------------------------- 主题预设 */
 
@@ -182,14 +182,33 @@ export function resolveCustomPick(ai) {
  * 顺序按面板上字段的先后，用户从上往下填就不会来回跳。
  */
 export function customModelIssue(ai) {
-  const { vendor, model, vendors } = resolveCustomPick(ai)
+  const c = (ai && ai.custom) || {}
+  const vendors = Array.isArray(c.vendors) ? c.vendors : []
   if (!vendors.length) return '还没有添加供应商'
-  if (!vendor) return '已配置的供应商都还不能用'
-  if (!isHttpUrl(vendor.baseUrl)) return `「${vendor.name}」的接口地址要填完整的 http(s) 地址`
-  if (!vendor.models.length) return `「${vendor.name}」下还没有添加模型`
-  if (!model) return `「${vendor.name}」下没有选中可用的模型`
-  if (!String(vendor.apiKey || '').trim()) return `「${vendor.name}」还没有填 API Key`
+  // 一家都挑不出来时，报第一家的具体原因 —— 只说"都还不能用"，用户不知道从哪改起。
+  // resolveCustomPick 只认"能用的"，所以这里不能用它的结果当报表对象。
+  const { vendor, model } = resolveCustomPick(ai)
+  const v = vendor || vendors[0]
+  const m = vendor ? model : v.models[0] || null
+  if (!isHttpUrl(v.baseUrl)) return `「${v.name}」的接口地址要填完整的 http(s) 地址`
+  if (!v.models.length) return `「${v.name}」下还没有添加模型`
+  if (!m) return `「${v.name}」下没有选中可用的模型`
+  if (!String(v.apiKey || '').trim()) return `「${v.name}」还没有填 API Key`
   return ''
+}
+
+/** 面板里要点亮的那一对：先认用户显式选的，pick 空了再退回自动挑的那个 */
+export function activePickKey(custom) {
+  const c = custom || {}
+  const vendors = Array.isArray(c.vendors) ? c.vendors : []
+  const raw = String(c.pick || '')
+  if (raw) {
+    const { vendorId, modelId } = parsePick(raw)
+    const v = vendors.find((x) => x.id === vendorId)
+    if (v && v.models.some((m) => m.id === modelId)) return raw
+  }
+  const { vendor, model } = resolveCustomPick({ custom: c })
+  return vendor && model ? `${vendor.id}::${model.id}` : ''
 }
 
 /** 自定义动效的起始示例：一段能直接跑起来的最小代码 */
@@ -451,8 +470,7 @@ function vendorListHtml(custom) {
   if (!list.length) {
     return '<p class="ai-models-msg">还没有供应商，点下面的「+ 添加供应商」开始。</p>'
   }
-  const { vendor: onVendor, model: onModel } = resolveCustomPick({ custom })
-  const onKey = onVendor && onModel ? `${onVendor.id}::${onModel.id}` : ''
+  const onKey = activePickKey(custom)
 
   return list
     .map((v) => {
@@ -467,7 +485,7 @@ function vendorListHtml(custom) {
             <button type="button" class="model-pick" data-pick="${escapeHtml(key)}" aria-pressed="${on}">
               <span class="model-name">${escapeHtml(m.name)}</span>
             </button>
-            <button type="button" class="icon-btn model-del" data-model-del="${escapeHtml(key)}"
+            <button type="button" class="model-del" data-model-del="${escapeHtml(key)}"
                     aria-label="删除模型 ${escapeHtml(m.name)}" title="删除模型">×</button>
           </div>`
             })
@@ -900,20 +918,14 @@ export function mountSettingsPanel(host, settings, onChange, opts = {}) {
         input?.focus()
         return
       }
+      // id 必须在这里就定下来：交给 normalize 补的话，每次规范化都会新生成一个，
+      // 于是"先算 id 再选中"会选中一个根本不存在的 id（表现是选中态根本没变）。
+      const fresh = { id: uid('m'), name }
       const vendors = vendorsOf().map((v) =>
-        v.id === id ? { ...v, models: [...v.models, { name }] } : v
+        v.id === id ? { ...v, models: [...v.models, fresh] } : v
       )
-      // 刚添加的模型通常就是想用的那个 —— 先过一遍 normalize 拿到它生成的 id，再选中
-      const probe = normalizeSettings({
-        ...cur,
-        ai: { ...cur.ai, custom: { ...cur.ai.custom, vendors } },
-      })
-      const target = probe.ai.custom.vendors.find((v) => v.id === id)
-      const fresh = target && target.models[target.models.length - 1]
-      commitVendors(vendors, {
-        rerender: true,
-        pick: target && fresh ? `${target.id}::${fresh.id}` : probe.ai.custom.pick,
-      })
+      // 刚添加的模型通常就是想用的那个 —— 直接选中它
+      commitVendors(vendors, { rerender: true, pick: `${id}::${fresh.id}` })
       return
     }
     if (act === 'close') host.dispatchEvent(new CustomEvent('settings-close', { bubbles: true }))

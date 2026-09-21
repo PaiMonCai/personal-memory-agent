@@ -809,43 +809,146 @@ console.log('\n[15] AI 模型设置')
 
   // 配不齐时要明确说缺什么，而不是静默失败
   let status = panel.querySelector('[data-ai-custom-status]').textContent
-  ok(status.indexOf('接口地址') >= 0, `缺地址时提示准确（"${status}"）`)
+  ok(status.indexOf('还没有添加供应商') >= 0, `没供应商时提示准确（"${status}"）`)
+  ok(
+    panel.querySelectorAll('.vendor').length === 0,
+    '一开始没有供应商卡片'
+  )
 
-  const fill = (selector, value) => {
-    const el = panel.querySelector(selector)
+  const setVal = (el, value) => {
     el.value = value
     el.dispatchEvent(new window.Event('input', { bubbles: true }))
   }
-  fill('[data-set="ai.custom.baseUrl"]', 'https://api.example.com/v1')
+  const fillVendor = (field, value, idx = 0) => {
+    setVal(panel.querySelectorAll(`[data-vendor-field="${field}"]`)[idx], value)
+  }
+  const statusText = () => panel.querySelector('[data-ai-custom-status]').textContent
+
+  // ---- 加第一家供应商
+  panel.querySelector('[data-set-act="add-vendor"]').click()
   await frame()
-  status = panel.querySelector('[data-ai-custom-status]').textContent
+  ok(panel.querySelectorAll('.vendor').length === 1, '点「添加供应商」后出现一张卡片')
+  status = statusText()
+  ok(status.indexOf('接口地址') >= 0, `新供应商缺地址时提示准确（"${status}"）`)
+
+  fillVendor('name', 'DeepSeek')
+  await frame()
+  fillVendor('baseUrl', 'https://api.example.com/v1')
+  await frame()
+  status = statusText()
+  ok(status.indexOf('还没有添加模型') >= 0, `缺模型时提示准确（"${status}"）`)
+  ok(status.indexOf('DeepSeek') >= 0, '提示里带上供应商名，多家时不会认错')
+
+  // ---- 在这家下面加模型：输入框里回车即可
+  const newInput = panel.querySelector('[data-model-new]')
+  setVal(newInput, 'deepseek-chat')
+  newInput.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+  await frame()
+  ok(panel.querySelectorAll('.model-row').length === 1, '回车添加了一个模型')
+  ok(
+    panel.querySelector('.model-row').classList.contains('active'),
+    '刚添加的模型自动选中（通常就是想用的那个）'
+  )
+  status = statusText()
   ok(status.indexOf('API Key') >= 0, `缺密钥时提示准确（"${status}"）`)
 
-  fill('[data-set="ai.custom.apiKey"]', 'sk-test-123')
+  fillVendor('apiKey', 'sk-test-123')
   await frame()
-  status = panel.querySelector('[data-ai-custom-status]').textContent
-  ok(status.indexOf('模型名') >= 0, `缺模型名时提示准确（"${status}"）`)
+  ok(statusText().indexOf('配置完整') >= 0, `配齐后提示完成（"${statusText()}"）`)
 
-  fill('[data-set="ai.custom.model"]', 'deepseek-chat')
+  // ---- 加第二家并选它的模型：选中态要跟着走
+  panel.querySelector('[data-set-act="add-vendor"]').click()
   await frame()
-  status = panel.querySelector('[data-ai-custom-status]').textContent
-  ok(status.indexOf('配置完整') >= 0, `配齐后提示完成（"${status}"）`)
+  ok(panel.querySelectorAll('.vendor').length === 2, '可以再加一家供应商')
+  fillVendor('name', 'Moonshot', 1)
+  fillVendor('baseUrl', 'https://api.moonshot.cn/v1', 1)
+  fillVendor('apiKey', 'sk-ms', 1)
+  await frame()
+  const newInput2 = panel.querySelectorAll('[data-model-new]')[1]
+  setVal(newInput2, 'moonshot-v1-8k')
+  panel
+    .querySelectorAll('[data-set-act="add-model"]')[1]
+    .dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await frame()
+  ok(panel.querySelectorAll('.model-row').length === 2, '两家各有一个模型')
+  const activeRows = panel.querySelectorAll('.model-row.active')
+  ok(activeRows.length === 1, `选中态唯一（实际 ${activeRows.length}）`)
+  ok(
+    activeRows[0].textContent.indexOf('moonshot-v1-8k') >= 0,
+    `新加的模型成为选中项（"${activeRows[0].textContent.trim()}"）`
+  )
 
-  // 非法地址要被拦住
-  fill('[data-set="ai.custom.baseUrl"]', 'javascript:alert(1)')
+  // 点回第一个模型，选中态要切回去
+  const firstPick = panel.querySelectorAll('.model-pick')[0]
+  firstPick.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   await frame()
-  status = panel.querySelector('[data-ai-custom-status]').textContent
+  ok(
+    panel.querySelectorAll('.model-row')[0].classList.contains('active'),
+    '点选别的模型会换选中项'
+  )
+
+  // ---- 删掉正在用的模型：不该让整条链路哑掉，要自动退回一个能用的
+  const delActive = panel.querySelector('.model-row.active .model-del')
+  delActive.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await frame()
+  ok(panel.querySelectorAll('.model-row').length === 1, '删除后只剩一个模型')
+  ok(
+    panel.querySelector('.model-row').classList.contains('active'),
+    '删掉选中项后自动退回剩下的那个（不会变成"没选模型"）'
+  )
+
+  // ---- 删掉一家供应商，焦点不能掉进虚空
+  panel.querySelector('.vendor .vendor-del').dispatchEvent(
+    new window.MouseEvent('click', { bubbles: true })
+  )
+  await frame()
+  ok(panel.querySelectorAll('.vendor').length === 1, '供应商被删除')
+  ok(
+    window.document.activeElement === panel.querySelector('[data-set-act="add-vendor"]'),
+    `删掉供应商后焦点落到「添加供应商」（${window.document.activeElement &&
+      window.document.activeElement.className}）`
+  )
+
+  // 重新补一家，供后面的保存用例使用
+  panel.querySelector('[data-set-act="add-vendor"]').click()
+  await frame()
+  fillVendor('name', 'DeepSeek', 1)
+  fillVendor('baseUrl', 'https://api.example.com/v1/', 1) // 故意带尾斜杠
+  fillVendor('apiKey', 'sk-test-123', 1)
+  setVal(panel.querySelectorAll('[data-model-new]')[1], 'deepseek-chat')
+  panel
+    .querySelectorAll('[data-set-act="add-model"]')[1]
+    .dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await frame()
+
+  // 非法地址要被拦住：先选中这家，它才是"当前要用的"，问题必须报出来
+  panel
+    .querySelectorAll('.model-pick')[1]
+    .dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await frame()
+  fillVendor('baseUrl', 'javascript:alert(1)', 1)
+  await frame()
+  status = statusText()
   ok(status.indexOf('http') >= 0, `非 http(s) 地址被拒（"${status}"）`)
-  fill('[data-set="ai.custom.baseUrl"]', 'https://api.example.com/v1')
+  fillVendor('baseUrl', 'https://api.example.com/v1', 1)
   await frame()
 
-  // 尾斜杠会被规范化掉，避免拼出 //chat/completions
-  fill('[data-set="ai.custom.baseUrl"]', 'https://api.example.com/v1/')
-  await new Promise((r) => setTimeout(r, 900))
-  const c = (window.__prefsWrite.ai || {}).custom || {}
-  ok(c.baseUrl === 'https://api.example.com/v1', `地址尾斜杠被规范化（${c.baseUrl}）`)
-  ok(c.apiKey === 'sk-test-123', '密钥随设置保存')
-  ok(c.model === 'deepseek-chat', '模型名随设置保存')
+  await new Promise((r) => setTimeout(r, 900)) // 等防抖保存
+  const savedCustom = (window.__prefsWrite.ai || {}).custom || {}
+  const sv = savedCustom.vendors || []
+  ok(Array.isArray(savedCustom.vendors), '供应商清单随设置保存')
+  const ds = sv.find((v) => v.name === 'DeepSeek')
+  ok(!!ds, '按名字能找到保存下来的供应商')
+  ok(ds && ds.baseUrl === 'https://api.example.com/v1', `地址尾斜杠被规范化（${ds && ds.baseUrl}）`)
+  ok(ds && ds.apiKey === 'sk-test-123', '密钥随设置保存')
+  ok(
+    ds && ds.models.some((m) => m.name === 'deepseek-chat'),
+    '模型挂在对应供应商下面'
+  )
+  ok(
+    typeof savedCustom.pick === 'string' && savedCustom.pick.indexOf('::') > 0,
+    `选中项以 vendorId::modelId 形式保存（${savedCustom.pick}）`
+  )
 
   // 生成参数
   const temp = panel.querySelector('[data-set="ai.temperature"]')
@@ -861,12 +964,49 @@ console.log('\n[15] AI 模型设置')
 
   // 越界值要被夹紧，而不是原样写进设置
   const norm = settingsMod.normalizeSettings({
-    ai: { mode: 'custom', temperature: 99, maxTokens: 999999, custom: { baseUrl: 'https://a.com/' } },
+    ai: { mode: 'custom', temperature: 99, maxTokens: 999999, custom: { vendors: [] } },
   })
   ok(norm.ai.temperature === 2, `温度越界被夹到上限（${norm.ai.temperature}）`)
   ok(norm.ai.maxTokens === 32000, `最大长度越界被夹到上限（${norm.ai.maxTokens}）`)
-  ok(norm.ai.custom.baseUrl === 'https://a.com', '规范化时也去掉尾斜杠')
   ok(norm.ai.mode === 'custom', '自定义模式被保留')
+
+  // 旧的「单条地址 + 密钥 + 模型名」要被迁成供应商清单，历史设置不能说丢就丢
+  const mig = settingsMod.normalizeSettings({
+    ai: { mode: 'custom', custom: { baseUrl: 'https://legacy.com/v1/', apiKey: 'sk-old', model: 'old-model' } },
+  })
+  ok(mig.ai.custom.vendors.length === 1, `旧配置迁出一家供应商（${mig.ai.custom.vendors.length}）`)
+  ok(mig.ai.custom.vendors[0].baseUrl === 'https://legacy.com/v1', '迁移时去掉尾斜杠')
+  ok(mig.ai.custom.vendors[0].apiKey === 'sk-old', '迁移时带上密钥')
+  ok(
+    mig.ai.custom.vendors[0].models.some((m) => m.name === 'old-model'),
+    '迁移时带上原来的模型'
+  )
+  ok(
+    mig.ai.custom.pick === `${mig.ai.custom.vendors[0].id}::${mig.ai.custom.vendors[0].models[0].id}`,
+    '迁移后原来的模型仍是选中项'
+  )
+  ok(
+    settingsMod.customModelIssue(mig.ai) === '',
+    `迁移出来的配置可以直接用（"${settingsMod.customModelIssue(mig.ai)}"）`
+  )
+
+  // 同一家下面重名没有意义，后来的要被丢掉
+  const dup = settingsMod.normalizeSettings({
+    ai: {
+      custom: {
+        vendors: [
+          { name: 'A', baseUrl: 'https://a.com', apiKey: 'k', models: ['m1', 'm1', 'm2'] },
+        ],
+      },
+    },
+  })
+  ok(dup.ai.custom.vendors[0].models.length === 2, `重名模型被去掉（${dup.ai.custom.vendors[0].models.length}）`)
+
+  // 容量上限：设置列不能无限膨胀
+  const many = settingsMod.normalizeSettings({
+    ai: { custom: { vendors: Array.from({ length: 60 }, () => ({ name: 'x' })) } },
+  })
+  ok(many.ai.custom.vendors.length === 20, `供应商数量被夹到上限（${many.ai.custom.vendors.length}）`)
 
   // 非法 mode 要回退到云服务，避免出现第三个分支
   const bad = settingsMod.normalizeSettings({ ai: { mode: 'evil' } })
@@ -904,12 +1044,25 @@ console.log('\n[16] 自定义模型的真实调用路径')
       { status, headers: { 'content-type': ctype } }
     )
 
-  aiMod.useAiSettings({
-    mode: 'custom',
-    temperature: 0.5,
-    maxTokens: 128,
-    custom: { baseUrl: 'https://api.example.com/v1/', apiKey: 'sk-x', model: 'demo' },
-  })
+  // 地址与密钥挂在供应商上，模型挂在供应商下面
+  const vendorCfg = (name, baseUrl, apiKey, models, pickIdx = 0) => {
+    const vendors = [
+      {
+        id: 'v1',
+        name,
+        baseUrl,
+        apiKey,
+        models: models.map((n, i) => ({ id: `m${i + 1}`, name: n })),
+      },
+    ]
+    return {
+      mode: 'custom',
+      temperature: 0.5,
+      maxTokens: 128,
+      custom: { pick: `v1::m${pickIdx + 1}`, vendors },
+    }
+  }
+  aiMod.useAiSettings(vendorCfg('示例家', 'https://api.example.com/v1/', 'sk-x', ['demo', 'other']))
 
   let seenUrl = ''
   let seenBody = null
@@ -991,7 +1144,7 @@ console.log('\n[16] 自定义模型的真实调用路径')
     called = true
     return sseRes([])
   }
-  aiMod.useAiSettings({ mode: 'custom', custom: { baseUrl: '', apiKey: '', model: '' } })
+  aiMod.useAiSettings({ mode: 'custom', custom: { pick: '', vendors: [] } })
   let errCfg = ''
   try {
     await aiMod.answerQuestion({ question: 'x', entries: [] })
@@ -1000,6 +1153,61 @@ console.log('\n[16] 自定义模型的真实调用路径')
   }
   ok(errCfg.indexOf('自定义模型') >= 0, `配置不全时明确报错（"${errCfg}"）`)
   ok(!called, '配置不全时根本不发请求')
+
+  // 有供应商但没填地址：要说是哪一家缺什么，而不是笼统的"都还不能用"
+  aiMod.useAiSettings(vendorCfg('空地址家', '', 'sk-x', ['demo']))
+  let errUrl = ''
+  try {
+    await aiMod.answerQuestion({ question: 'x', entries: [] })
+  } catch (e) {
+    errUrl = String(e.message)
+  }
+  ok(errUrl.indexOf('空地址家') >= 0, `缺地址时点名是哪一家（"${errUrl}"）`)
+
+  // pick 指向已删除的模型时，自动退回这家剩下的那个，而不是直接哑掉
+  aiMod.useAiSettings({
+    mode: 'custom',
+    temperature: 0.5,
+    maxTokens: 0,
+    custom: {
+      pick: 'v1::m-gone',
+      vendors: [
+        { id: 'v1', name: '回退家', baseUrl: 'https://fb.com/v1', apiKey: 'k', models: [{ id: 'm9', name: 'fallback-model' }] },
+      ],
+    },
+  })
+  let seenModel = ''
+  globalThis.fetch = async (url, init) => {
+    seenModel = JSON.parse(init.body).model
+    return sseRes(['data: {"choices":[{"delta":{"content":"好"}}]}\n\n', 'data: [DONE]\n\n'])
+  }
+  const t4 = await aiMod.answerQuestion({ question: 'x', entries: [] })
+  ok(t4 === '好', '选中项失效后仍能正常回答')
+  ok(seenModel === 'fallback-model', `选中项失效时自动回退（${seenModel}）`)
+
+  // 两家供应商时，只打选中那家的地址
+  aiMod.useAiSettings({
+    mode: 'custom',
+    temperature: 1,
+    maxTokens: 0,
+    custom: {
+      pick: 'v2::m1',
+      vendors: [
+        { id: 'v1', name: '第一家', baseUrl: 'https://one.com/v1', apiKey: 'k1', models: [{ id: 'm1', name: 'one-model' }] },
+        { id: 'v2', name: '第二家', baseUrl: 'https://two.com/v1', apiKey: 'k2', models: [{ id: 'm1', name: 'two-model' }] },
+      ],
+    },
+  })
+  let seenUrl2 = ''
+  let seenAuth2 = ''
+  globalThis.fetch = async (url, init) => {
+    seenUrl2 = String(url)
+    seenAuth2 = init.headers.Authorization
+    return sseRes(['data: {"choices":[{"delta":{"content":"是"}}]}\n\n', 'data: [DONE]\n\n'])
+  }
+  await aiMod.answerQuestion({ question: 'x', entries: [] })
+  ok(seenUrl2 === 'https://two.com/v1/chat/completions', `用选中那家的地址（${seenUrl2}）`)
+  ok(seenAuth2 === 'Bearer k2', `用选中那家的密钥（${seenAuth2}）`)
 
   globalThis.fetch = savedFetch
   aiMod.useAiSettings(null)

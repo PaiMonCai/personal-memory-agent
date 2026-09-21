@@ -13,7 +13,7 @@
 | 重点提取 | 从原文里抽出关键信息与隐含的行动项 |
 | 自动关联 | 与已有记录比对，建立双向可见的关联并给出关联理由 |
 | 关键词检索 | 数据库端函数检索，标题 / 原文 / 摘要 / 标签 / 重点全覆盖 |
-| 智能问答 | 只依据本人记录回答，记录里没有的会直接说明没有 |
+| 智能问答 | 先检索相关个人记录，再只依据命中的记录回答；记录里没有的会直接说明没有 |
 | 待办整理 | 按逾期 / 今天 / 一周内分组，并可让模型给出优先级与取舍建议 |
 | 阶段复盘 | 按 7 天 / 30 天 / 全部区间生成总结、主题与后续行动建议 |
 | 个性设置 | 顶栏「设置」入口：8 套主题预设（含 3 套深色）、自定义强调色与背景渐变、背景图片、6 种动态特效、圆角与紧凑密度；设置存云端，换设备跟随账号 |
@@ -37,6 +37,8 @@ assets/js/app.js        状态、视图渲染与交互（含 md 导入）
 tools/bump-version.py   发布前统一递增静态资源版本号
 tools/dom-test.mjs      jsdom 回归测试：启动、视图切换、三栏抽屉、撤销删除、键盘快捷键
 tools/contrast-check.py WCAG 2.2 AA 对比度核验（浅色 / 深色各 14 与 11 组）
+database/001_baseline.sql 数据库基线：表 / RLS / 检索与原子 RPC
+.github/workflows/quality.yml GitHub Actions：JS / DOM / 静态契约 / 对比度 / SQL 校验
 ```
 
 ## 技术要点
@@ -45,7 +47,7 @@ tools/contrast-check.py WCAG 2.2 AA 对比度核验（浅色 / 深色各 14 与 
 - **数据在云端**：三张表 `entries` / `entry_links` / `reviews`，全部启用 RLS，行级策略为 `owner_id = auth.uid()`，归属由数据库 `DEFAULT auth.uid()` 决定，前端从不发送 `owner_id`。
 - **登录**：邮箱密码登录、邮箱验证码登录、验证邮箱后设置密码注册、忘记密码重置。**登录只在发布后的正式域名下可用**，本地预览域不在注册白名单内。
 - **大模型**：免密钥调用，接口仅支持流式，一次性任务也在 `ai.js` 里把 SSE 分片拼成完整文本。每次调用第一条消息都是应用自有的 system 消息，用户内容经围栏包裹后拼入提示词。
-- **检索**：`pma_search_entries(keyword, kind_filter, status_filter)` 数据库函数，RLS 在函数内同样生效。
+- **检索**：普通搜索走 `pma_search_entries(...)`；问答优先走 `pma_retrieve_entries(...)` 做相关性排名，旧环境没有新 RPC 时自动回退。长文本同步维护 `entry_chunks`，为后续语义 embedding 保留稳定分块层。
 - **显隐一律用 class，不用 `hidden` 属性**：浏览器 UA 样式里那条隐藏规则优先级低于作者样式表，任何 `display: flex` / `grid` 都会盖掉它 —— 结果是「属性设成 hidden 了，界面上照旧显示」。曾因此让拖拽提示层的蓝色罩层永久挂在输入区上。现在 CSS 顶部留了一条 `!important` 兜底，但新增的浮层仍应默认 `display: none`、由 `.show` 之类的类来切换。
 
 ## 设计语言：案头档案
@@ -200,7 +202,7 @@ python tools/bump-version.py 20260923a
 
 `tools/dom-test.mjs` 覆盖启动、视图切换、三栏抽屉与互斥、滚动锁、撤销删除、键盘快捷键、`Esc` 分层关闭、拖拽导入、设置面板特效联动、自定义 JS 动效、筛选栏滑动指示器等 176 项断言。
 
-`tools/static-check.py` 是**另一层必要的校验**：DOM 测试断言的是属性与 class，而真正决定用户看到什么的是 CSS，两者脱节就会漏 bug。所以显隐、布局这类契约要在 CSS 文本层面再断言一次（详见下节）。
+`tools/static-check.py` 是**另一层必要的校验**：DOM 测试断言的是属性与 class，而真正决定用户看到什么的是 CSS，两者脱节就会漏 bug。所以显隐、布局这类契约要在 CSS 文本层面再断言一次（详见下节）。\n\nGitHub Actions 会在推送与 PR 上自动执行 JS 语法、DOM 回归、静态契约、WCAG 对比度，并在临时 PostgreSQL 16 中实际加载 `database/001_baseline.sql`。
 
 ## 配色与对比度
 
@@ -228,6 +230,7 @@ python tools/bump-version.py 20260923a
 
 - `entries` — 原始文本 + AI 产出的标题 / 分类 / 摘要 / 重点 / 行动项 / 标签 / 优先级 / 截止日 / AI 状态
 - `entry_links` — 条目之间的关联（source_id → target_id + 关联理由）
+- `entry_chunks` — 长文本稳定分块；当前用于索引基础，后续可挂语义 embedding
 - `reviews` — 阶段复盘（区间、总结、行动建议、统计）
 - `preferences` — 个性化设置（`theme` / `effect` 两个 JSONB；`owner_id` 唯一，一人一行，用 upsert 写入）
 

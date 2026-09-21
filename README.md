@@ -2,7 +2,7 @@
 
 零散想法、资料与待办的统一收件箱。记录之后自动分类、生成摘要、提炼重点、发现关联，并支持关键词检索、智能问答、待办整理与阶段复盘。
 
-线上地址：https://personal-memory-agent-50179.app.workbuddy.host/
+部署方式：自建 Docker（Nginx + Hono + PostgreSQL），默认访问 `http://localhost:8080/`。
 
 ## 功能
 
@@ -16,7 +16,7 @@
 | 智能问答 | 先检索相关个人记录，再只依据命中的记录回答；记录里没有的会直接说明没有 |
 | 待办整理 | 按逾期 / 今天 / 一周内分组，并可让模型给出优先级与取舍建议 |
 | 阶段复盘 | 按 7 天 / 30 天 / 全部区间生成总结、主题与后续行动建议 |
-| 个性设置 | 顶栏「设置」入口：8 套主题预设（含 3 套深色）、自定义强调色与背景渐变、背景图片、6 种动态特效、圆角与紧凑密度；设置存云端，换设备跟随账号 |
+| 个性设置 | 顶栏「设置」入口：8 套主题预设（含 3 套深色）、自定义强调色与背景渐变、背景图片、6 种动态特效、圆角与紧凑密度；设置存自建 PostgreSQL，换设备跟随账号 |
 | 悬浮三栏 | **左磁吸胶囊菜单 / 中内容区 / 右随手记卡片**。左右两栏脱离布局浮在内容之上，垂直居中；内容占满视口，只靠内边距避让。输入台是固定尺寸的矩形块，不撑满高度 |
 | 响应式 | 三档断点（900 / 1180 按内容定），触摸设备放大命中区域并去掉悬停态，适配刘海安全区与横屏矮屏 |
 | 交互细节 | 键盘 `/` 搜索、`n` 随手记、`Esc` 逐层关闭；抽屉与面板锁背景滚动 + 焦点陷阱；删除改为「撤销」而非确认框 |
@@ -27,8 +27,8 @@
 ```
 index.html              页面骨架（登录页 + 侧栏 + 主区 + 详情抽屉 + 设置面板容器）
 assets/style.css        样式（含 .sidebar 侧栏、.bg-layer 背景层、html[data-mode="dark"] 深色主题）
-assets/js/config.js     云服务 publicConfig（endpoint + publishableKey）
-assets/js/cloud.js      SDK 初始化、认证封装、数据读写（含个人偏好）
+assets/js/config.js     浏览器公开配置（默认只含 /api 路径）
+assets/js/api.js         自建 REST API 客户端（认证 / 数据 / 默认 AI）
 assets/js/ai.js         大模型调用：分析 / 问答 / 复盘 / 待办整理
 assets/js/settings.js   主题预设、自定义配色、布局与动效设置、设置面板渲染与应用
 assets/js/effects.js    动态特效引擎（单 canvas，6 种内置 + 自定义 JS）
@@ -37,17 +37,20 @@ assets/js/app.js        状态、视图渲染与交互（含 md 导入）
 tools/bump-version.py   发布前统一递增静态资源版本号
 tools/dom-test.mjs      jsdom 回归测试：启动、视图切换、三栏抽屉、撤销删除、键盘快捷键
 tools/contrast-check.py WCAG 2.2 AA 对比度核验（浅色 / 深色各 14 与 11 组）
-database/001_baseline.sql 数据库基线：表 / RLS / 检索与原子 RPC
-.github/workflows/quality.yml GitHub Actions：JS / DOM / 静态契约 / 对比度 / SQL 校验
+server/src/             Hono 自建后端（认证 / PostgreSQL / SMTP / AI 网关）
+database/001_baseline.sql 自建 PostgreSQL 基线
+docker-compose.yml       PostgreSQL + Hono API + Nginx
+deploy/nginx.conf        静态站点与 /api 反向代理
+.github/workflows/quality.yml GitHub Actions：前端 / 后端 / DOM / SQL / API smoke test
 ```
 
 ## 技术要点
 
-- **无构建步骤**：纯静态站点，浏览器直接加载 ES 模块；云服务 SDK 走 CDN 的 IIFE 构建，暴露全局 `WorkBuddyCloud`（没有裸的 `createWorkBuddyCloud` 全局）。
-- **数据在云端**：三张表 `entries` / `entry_links` / `reviews`，全部启用 RLS，行级策略为 `owner_id = auth.uid()`，归属由数据库 `DEFAULT auth.uid()` 决定，前端从不发送 `owner_id`。
-- **登录**：邮箱密码登录、邮箱验证码登录、验证邮箱后设置密码注册、忘记密码重置。**登录只在发布后的正式域名下可用**，本地预览域不在注册白名单内。
-- **大模型**：免密钥调用，接口仅支持流式，一次性任务也在 `ai.js` 里把 SSE 分片拼成完整文本。每次调用第一条消息都是应用自有的 system 消息，用户内容经围栏包裹后拼入提示词。
-- **检索**：普通搜索走 `pma_search_entries(...)`；问答优先走 `pma_retrieve_entries(...)` 做相关性排名，旧环境没有新 RPC 时自动回退。长文本同步维护 `entry_chunks`，为后续语义 embedding 保留稳定分块层。
+- **前端无构建步骤**：浏览器直接加载 ES 模块；不依赖任何托管平台 SDK，所有业务请求统一走同源 `/api`。
+- **数据自建**：PostgreSQL 16 只允许 Hono API 访问，不向公网暴露 5432；每条业务查询都带当前会话对应的 `owner_id`。
+- **登录**：自建邮箱密码 + 邮箱验证码体系；会话使用 HttpOnly Cookie，数据库只保存会话 token 的 SHA-256 哈希。SMTP、Cookie、验证码均由服务端控制。
+- **默认大模型**：由 Hono 服务端代理 OpenAI 兼容接口，服务端持有 `AI_API_KEY`；浏览器不会拿到默认模型密钥。用户自定义供应商仍可单独配置。
+- **检索**：普通搜索与 Ask 都由 Hono 直接查询 PostgreSQL；Ask 结合全文、词项、FTS、长文本 chunk 与轻量时间权重做排序。`entry_chunks` 为后续 embedding 保留稳定分块层。
 - **显隐一律用 class，不用 `hidden` 属性**：浏览器 UA 样式里那条隐藏规则优先级低于作者样式表，任何 `display: flex` / `grid` 都会盖掉它 —— 结果是「属性设成 hidden 了，界面上照旧显示」。曾因此让拖拽提示层的蓝色罩层永久挂在输入区上。现在 CSS 顶部留了一条 `!important` 兜底，但新增的浮层仍应默认 `display: none`、由 `.show` 之类的类来切换。
 
 ## 设计语言：案头档案
@@ -93,7 +96,7 @@ database/001_baseline.sql 数据库基线：表 / RLS / 检索与原子 RPC
 
 **筛选栏的下划线是一条滑动的线，不是一个一个展开的**。收件箱的分类与状态、复盘的区间都用同一个指示器：切换时线从旧栏目滑向新栏目，而不是"旧的消失、新的出现"两段割裂动画 —— 后者就是僵硬感的来源。因为筛选行是整块重写的，实现上要先记住上一次的几何，渲染后把新指示器放回旧位置、强制重排、再过渡到目标位置（FLIP）。切换视图时会丢掉旧几何，免得线从上一个页面长途滑过来；窗口尺寸变化会让 chip 换行，此时直接贴合、不做过渡。
 
-**点击筛选要立刻有反应**。点击后先把选中态和指示器挪到位（同步、零等待），再发起云端读取；等数据回来整块重渲染时，指示器已经在正确位置上了。若反过来先 `await` 再渲染，用户感知到的就是「点了半天线才开始滑」。
+**点击筛选要立刻有反应**。点击后先把选中态和指示器挪到位（同步、零等待），再发起服务器读取；等数据回来整块重渲染时，指示器已经在正确位置上了。若反过来先 `await` 再渲染，用户感知到的就是「点了半天线才开始滑」。
 
 **两侧悬浮方块可以上下拖动**。左目录胶囊和右随手记卡片顶上各有一条手柄，按住拖到想要的高度，松手会吸附到最近的一档（贴顶 / 垂直居中 / 贴底）；键盘用户聚焦手柄后可用 `↑` `↓` 微调（按住 `Shift` 大步）、`Home` 回正中。位置存在 localStorage，刷新后还在。
 
@@ -119,7 +122,7 @@ database/001_baseline.sql 数据库基线：表 / RLS / 检索与原子 RPC
 
 设置面板的「AI 模型」一节，两种来源二选一：
 
-**云服务模型**（默认）。模型目录由云服务提供，按当前应用的名义调用，不需要密钥。
+**服务器模型**（默认）。模型目录由自建 Hono 服务提供，默认 AI Key 只存在服务端环境变量里。
 列表里可以直接选，也可以手填一个目录里没列出的 ID —— 目录未必列全，但后端可能认得。
 读取失败时会把**真实原因**摆出来并给「重试」，而不是静默显示「暂无模型」。
 
@@ -136,16 +139,16 @@ database/001_baseline.sql 数据库基线：表 / RLS / 检索与原子 RPC
 - 面板会实时告诉你还缺什么，且**点名是哪家**（地址 → 模型 → 密钥，顺序与字段顺序一致）；
   只说「都还不能用」的话，多家并存时根本不知道该改哪家。
 
-> 用 `fetch` 手解 SSE，因为云服务的 SDK 是另一套形状，复用不了。
+> 自定义供应商仍由浏览器 `fetch` 其 OpenAI 兼容接口并手解 SSE；默认模型则统一走 `/api/ai/chat`。
 > 同时兼容两种返回：真正的流式（`text/event-stream`）和一次性 JSON —— 有些网关不转发流。
 > 分片被任意切断也能拼回来（按 `\n` 缓冲，跨 chunk 的 JSON 不算完）。
 > 失败时说清楚是哪种：401 带服务端原因，连不上则提示可能是跨域 —— 浏览器直连要求对方
 > 允许 CORS，被拦时请填自己的中转地址。
 
 **生成参数**：温度（0~2）与最大长度（0~8192，0 = 交给服务端默认），两种来源共用。
-注意温度会**覆盖云服务给出的推荐值** —— 整理笔记建议 0.3~0.7。
+注意温度会**覆盖服务器模型的默认值** —— 整理笔记建议 0.3~0.7。
 
-**存哪儿**：`preferences.ai` 列（jsonb），随设置同步到云端，换设备免重填。
+**存哪儿**：`preferences.ai` 列（jsonb），随账号同步到自建 PostgreSQL；其中自定义供应商 API Key 在服务端用 AES-256-GCM 加密后落库。
 但**本地缓存里刻意剔掉了每家的 API Key** —— 那份缓存只是为了登录页不闪默认配色，没必要把密钥再往浏览器里存一份。
 
 早期版本只能填一个「地址 + 密钥 + 模型名」。那份配置不会丢：读取时由
@@ -187,7 +190,7 @@ database/001_baseline.sql 数据库基线：表 / RLS / 检索与原子 RPC
 ## 质量校验
 
 ```bash
-# DOM 回归测试（需要 jsdom，用假 SDK 替换云服务，不发真实请求）
+# DOM 回归测试（需要 jsdom，用假 /api 替换自建服务，不发真实请求）
 NODE_PATH=<jsdom 目录>/node_modules node tools/dom-test.mjs
 
 # WCAG 2.2 AA 对比度核验（改了配色就跑一次）
@@ -234,20 +237,36 @@ python tools/bump-version.py 20260923a
 - `reviews` — 阶段复盘（区间、总结、行动建议、统计）
 - `preferences` — 个性化设置（`theme` / `effect` 两个 JSONB；`owner_id` 唯一，一人一行，用 upsert 写入）
 
-## 本地预览
+## 自建部署
+
+最简单的方式是 Docker Compose：
 
 ```bash
-cd personal-memory-agent
-python -m http.server 8080 --bind 127.0.0.1
+cp .env.example .env
+# 修改 .env：数据库、SMTP、AI、加密密钥
+docker compose up -d
 ```
 
-本地只能查看界面，登录与数据相关功能需在正式域名下使用。
+默认：
+
+- Nginx：`http://127.0.0.1:8080`
+- Hono API：仅 Docker 内网，由 Nginx 转发 `/api/*`
+- PostgreSQL：仅 Docker 内网，不映射公网端口
+
+生产环境应在 Nginx/Caddy/Cloudflare 前面补 HTTPS，并把 `.env` 中 `APP_ORIGIN` 改成实际 HTTPS 域名。
+
+纯前端预览仍可使用：
+
+```bash
+python -m http.server 8081 --bind 127.0.0.1
+```
+
+但没有 `/api` 时只能查看静态界面，无法登录或读写数据。
 
 ## 维护须知：每次发布都要递增版本号
 
-平台的重定向网关会给静态资源做边缘缓存。重新发布后，裸路径（`assets/js/app.js`）可能仍返回
-**旧副本**（响应头 `Eo-Cache-Status: HIT`），呈现出"新 HTML + 旧 JS"的混合状态，
-让人误以为改动没生效。
+浏览器、Nginx 或前置 CDN 都可能缓存静态资源。重新发布后如果 HTML 与 JS 命中不同版本，
+会出现"新 HTML + 旧 JS"的混合状态，因此所有静态模块都保留统一版本指纹。
 
 因此所有静态资源引用都带版本指纹，**发布前必须把版本号统一改大**，涉及以下位置：
 
@@ -255,7 +274,7 @@ python -m http.server 8080 --bind 127.0.0.1
 - 每个 JS 模块的 `import ... from './x.js?v=...'`
 
 版本号必须**全站完全一致**。ES 模块的说明符就是模块标识：同一文件若被写成不同说明符，
-浏览器会分别加载两份 —— 对 `cloud.js` 而言会出现两个 SDK 客户端实例，务必避免。
+浏览器会分别加载两份同名模块并产生两套模块状态，因此必须保持所有 import 的版本指纹一致。
 
 不要手工改（容易漏，实测漏过一次）。用工具一条命令改完：
 

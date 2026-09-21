@@ -2,12 +2,12 @@
  * 大模型层：分类 / 摘要 / 重点提取 / 关联判断 / 问答 / 阶段复盘。
  *
  * 说明：
- *  - 模型服务为免密钥调用，名额归属当前应用，所有请求都带应用自身的 Origin。
- *  - 接口只支持流式（stream: true），一次性任务也在这里把 SSE 分片拼成完整文本。
+ *  - 默认模型经自建 Hono API 代理，浏览器不接触服务端 AI Key。
+ *  - 自定义供应商仍可按用户设置直连 OpenAI 兼容接口。
  *  - 每个请求的第一条消息必须是本应用自有的 system 消息。
  */
-import { getCloud, listModels } from './cloud.js?v=20260922s'
-import { customModelIssue, resolveCustomPick } from './settings.js?v=20260922s'
+import { streamChat, listModels } from './api.js?v=20260922t'
+import { customModelIssue, resolveCustomPick } from './settings.js?v=20260922t'
 
 const MODEL_CACHE_TTL = 10 * 60 * 1000
 let _model = null
@@ -44,7 +44,7 @@ function aiCfg() {
 }
 
 /**
- * 云服务模式下取模型；自定义模式下从供应商清单里解析出"当前这一家 + 这一个模型"。
+ * 服务器模式下取模型；自定义模式下从供应商清单里解析出"当前这一家 + 这一个模型"。
  * 模型目录是权威来源：为空就明确报错，绝不硬编码模型 id。
  */
 export async function getModel() {
@@ -102,7 +102,7 @@ async function complete({ system, user, json = false, signal, onDelta }) {
   if (cfg.maxTokens > 0) params.max_tokens = cfg.maxTokens
 
   let text = ''
-  for await (const chunk of getCloud().llm.chat.completions.create(params)) {
+  for await (const chunk of streamChat(params)) {
     const delta = chunk.choices?.[0]?.delta
     if (delta?.content) {
       text += delta.content
@@ -116,7 +116,7 @@ async function complete({ system, user, json = false, signal, onDelta }) {
 /**
  * 直连第三方 OpenAI 兼容接口。
  *
- * 不能用云服务的 SDK —— 那是另一套形状，只能自己发 fetch 并手解 SSE。
+ * 自定义供应商由浏览器直接 fetch，并手解 SSE。
  * 兼容两种返回：真正的流式（text/event-stream）和一次性 JSON —— 有些网关不转发流。
  */
 async function completeViaCustom({ cfg, messages, json, signal, onDelta }) {

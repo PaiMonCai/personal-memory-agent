@@ -230,7 +230,11 @@ print()
 print('=== [N] AI 模型设置 ===')
 sjs = re.sub(r'\s+', '', (ROOT / 'assets' / 'js' / 'settings.js').read_text(encoding='utf-8'))
 ajs = re.sub(r'\s+', '', (ROOT / 'assets' / 'js' / 'ai.js').read_text(encoding='utf-8'))
-cjs = re.sub(r'\s+', '', (ROOT / 'assets' / 'js' / 'cloud.js').read_text(encoding='utf-8'))
+api_js = re.sub(r'\s+', '', (ROOT / 'assets' / 'js' / 'api.js').read_text(encoding='utf-8'))
+server_auth = re.sub(r'\s+', '', (ROOT / 'server' / 'src' / 'auth.js').read_text(encoding='utf-8'))
+server_data = re.sub(r'\s+', '', (ROOT / 'server' / 'src' / 'data.js').read_text(encoding='utf-8'))
+server_ai = re.sub(r'\s+', '', (ROOT / 'server' / 'src' / 'ai.js').read_text(encoding='utf-8'))
+server_crypto = re.sub(r'\s+', '', (ROOT / 'server' / 'src' / 'crypto.js').read_text(encoding='utf-8'))
 flat_app2 = re.sub(r'\s+', '', app)
 
 check('设置里有 ai 组', 'ai:{' in sjs and "mode:'cloud'" in sjs)
@@ -302,16 +306,16 @@ check('AI 层不反向 import app', "from'./app.js" not in ajs)
 
 print()
 print('=== [P] 设置的持久化（含新增的 ai 列）===')
-check('偏好读取覆盖 ai 列', "select('theme,effect,ai,updated_at')" in cjs)
-check('upsert 写入 ai', 'upsert({theme,effect,ai,updated_at' in cjs)
-check('模型目录统一出口', 'exportasyncfunctionlistModels()' in cjs)
+check('偏好读取走自建 API', "request('/preferences')" in api_js)
+check('偏好保存走自建 API', "request('/preferences',{method:'PUT'" in api_js)
+check('模型目录统一走自建 API', "request('/ai/models')" in api_js)
 check('保存设置时带上 ai', 'ai:state.settings.ai' in flat_app2)
 check('注入给面板的模型加载器', 'loadModels:()=>db.listModels()' in flat_app2)
 check('AI 层拿到当前设置', 'ai.useAiSettings(s.ai)' in flat_app2)
 check('本地缓存剔掉密钥', "apiKey:''" in flat_app2 and 'localStorage.setItem(SETTINGS_CACHE_KEY' in flat_app2)
 
 print()
-print('=== [Q] P0-P1 稳定性与记忆检索 ===')
+print('=== [Q] 自建后端、安全边界与记忆检索 ===')
 check('本地缓存逐家剔掉 vendors[] 内的密钥',
       "vendors:custom.vendors.map((v)=>({...v,apiKey:''}))" in flat_app2)
 check('问答使用局部 AbortController（catch 不会引用未定义变量）',
@@ -319,20 +323,42 @@ check('问答使用局部 AbortController（catch 不会引用未定义变量）
       and 'signal:controller.signal' in flat_app2
       and 'state.ask.controller===controller' in flat_app2)
 check('Ask 优先走相关记忆检索', 'db.retrieveEntries({query:text,limit:40})' in flat_app2)
-check('检索失败会回退最近记录', '[retrieval]' in app and 'activeEntries().slice(0,120)' in flat_app2)
 check('长文本会切块并同步索引', 'functionmemoryChunks(' in flat_app2 and 'db.replaceEntryChunks(' in flat_app2)
-check('删除走原子 RPC 兼容层', 'db.deleteEntryWithLinks(id)' in flat_app2)
-check('cloud 暴露排名检索 RPC', "rpc('pma_retrieve_entries'" in cjs)
-check('cloud 暴露原子关联 RPC', "rpc('pma_replace_links'" in cjs)
-check('cloud 暴露原子删除 RPC', "rpc('pma_delete_entry'" in cjs)
-check('cloud 暴露分块刷新 RPC', "rpc('pma_replace_entry_chunks'" in cjs)
+check('浏览器数据层只访问 /api', "constAPI=String(APP_CONFIG.apiBase||'/api')" in api_js)
+check('默认 AI 经服务器代理', 'forawait(constchunkofstreamChat(params))' in ajs)
+check('服务端数据查询按 owner_id 隔离', 'whereowner_id=$1' in server_data)
+check('关联替换使用数据库事务', 'awaittx(async(client)=>' in server_data and 'deletefromentry_linkswhereowner_id=$1andsource_id=$2' in server_data)
+check('会话 Cookie 为 HttpOnly', 'httpOnly:true' in server_auth)
+check('数据库只保存会话 token 哈希', 'token_hash' in server_auth and 'sha256(token)' in server_auth)
+check('邮箱验证码有频控与尝试次数限制', 'otpMaxPerHour' in server_auth and 'attempts>=5' in server_auth)
+check('默认 AI 有按用户每日额度', 'ai_usage' in server_ai and 'dailyLimit' in server_ai)
+check('自定义供应商 API Key 使用 AES-256-GCM', "createCipheriv('aes-256-gcm'" in server_crypto)
 
 db_sql = (ROOT / 'database' / '001_baseline.sql').read_text(encoding='utf-8')
-check('数据库 schema 已纳入版本控制', 'create table if not exists public.entries' in db_sql)
-check('数据库 RLS 已纳入版本控制', 'enable row level security' in db_sql and 'auth.uid()' in db_sql)
-for fn in ['pma_search_entries', 'pma_retrieve_entries', 'pma_replace_links', 'pma_delete_entry', 'pma_replace_entry_chunks']:
-    check(f'数据库函数 {fn} 已定义', f'function public.{fn}' in db_sql)
+check('自建数据库包含本地账号与会话表',
+      'create table if not exists users' in db_sql and 'create table if not exists sessions' in db_sql)
+check('业务表 owner_id 关联本地 users',
+      'owner_id uuid not null references users(id)' in db_sql)
+check('旧托管认证函数已清除', 'auth.uid()' not in db_sql)
 
+# 整个仓库不允许重新引入旧平台标识或旧 SDK。
+forbidden_hits = []
+for path in ROOT.rglob('*'):
+    if not path.is_file() or '.git' in path.parts:
+        continue
+    if path.suffix.lower() not in {'.js', '.html', '.md', '.sql', '.yml', '.yaml', '.json', '.py'}:
+        continue
+    try:
+        text = path.read_text(encoding='utf-8').lower()
+    except UnicodeDecodeError:
+        continue
+    legacy_name = 'work' + 'buddy'
+    legacy_key = 'wb' + 'pk_'
+    if legacy_name in text or legacy_key in text:
+        forbidden_hits.append(str(path.relative_to(ROOT)))
+check(f'旧平台代码与标识已彻底清除（{forbidden_hits or "无"}）', not forbidden_hits)
+
+print()
 print()
 if fails:
     print(f'RESULT: {len(fails)} PROBLEM(S) -> {fails}')

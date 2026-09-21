@@ -2,14 +2,12 @@
  * 信息管家 · 应用主逻辑
  *
  * 视图：收件箱 / 待办 / 问答 / 复盘
- * 数据：全部走云服务（认证 + 数据库 + 免密钥大模型）
+ * 数据：全部走自建 API（认证 + PostgreSQL + 服务端 AI 网关）
  */
-// 版本参数必须与 index.html 中的引用一致，且同一模块在所有文件中写法必须完全相同，
-// 否则 ES module 会被当成两个不同模块加载（cloud.js 会出现两个 SDK 客户端实例）。
-import { PUBLIC_CONFIG } from './config.js?v=20260922s'
-import * as db from './cloud.js?v=20260922s'
-import { describeError } from './cloud.js?v=20260922s'
-import * as ai from './ai.js?v=20260922s'
+// 版本参数必须与 index.html 中的引用一致，且同一模块在所有文件中写法必须完全相同。
+import * as db from './api.js?v=20260922t'
+import { describeError } from './api.js?v=20260922t'
+import * as ai from './ai.js?v=20260922t'
 import {
   escapeHtml,
   kindMeta,
@@ -24,14 +22,14 @@ import {
   toast,
   confirmDialog,
   debounce,
-} from './ui.js?v=20260922s'
+} from './ui.js?v=20260922t'
 import {
   applySettings,
   mountSettingsPanel,
   normalizeSettings,
   DEFAULT_SETTINGS,
-} from './settings.js?v=20260922s'
-import { initEffects, setEffect } from './effects.js?v=20260922s'
+} from './settings.js?v=20260922t'
+import { initEffects, setEffect } from './effects.js?v=20260922t'
 
 /* ==================================================================== 状态 */
 
@@ -58,24 +56,7 @@ const $ = (sel) => document.querySelector(sel)
 
 /* ==================================================================== 启动 */
 
-async function ensureSdk() {
-  for (let i = 0; i < 50; i++) {
-    if (window.WorkBuddyCloud && typeof window.WorkBuddyCloud.createWorkBuddyCloud === 'function') return
-    await new Promise((r) => setTimeout(r, 100))
-  }
-  throw new Error('云服务 SDK 加载失败，请检查网络后刷新页面')
-}
-
 async function boot() {
-  try {
-    await ensureSdk()
-  } catch (err) {
-    $('#boot').innerHTML = `<div class="boot-inner"><div class="boot-logo">⚠️</div><div class="boot-text">${escapeHtml(
-      err.message
-    )}</div></div>`
-    return
-  }
-
   try {
     const session = await db.getSession()
     if (session) {
@@ -94,7 +75,6 @@ function showAuth() {
   $('#boot').classList.add('hidden')
   $('#app-view').classList.add('hidden')
   $('#auth-view').classList.remove('hidden')
-  renderOriginWarning()
 }
 
 async function enterApp(session) {
@@ -109,43 +89,6 @@ async function enterApp(session) {
 }
 
 /* ================================================================== 认证层 */
-
-/* ------------------------------------------------------------ 域名守卫 */
-
-/**
- * 登录与云数据只在应用注册的发布域上可用：服务端按 Origin 精确校验，
- * localhost、内置预览域以及其它域名一律被拒。
- * 这里提前拦住并给出可执行的提示，而不是让用户只看到笼统的"网络不可用"。
- */
-function isOfficialOrigin() {
-  try {
-    const target = new URL(PUBLIC_CONFIG.endpoint)
-    return location.protocol === 'https:' && location.host === target.host
-  } catch {
-    return false
-  }
-}
-
-function renderOriginWarning() {
-  const box = $('#origin-warning')
-  if (!box) return
-  if (isOfficialOrigin()) {
-    box.classList.add('hidden')
-    box.innerHTML = ''
-    return
-  }
-  box.innerHTML = `<strong>⚠️ 当前不是正式访问域名</strong>
-    你打开的是 <code>${escapeHtml(location.host || location.href)}</code>，
-    而登录与云数据只在 <code>${escapeHtml(PUBLIC_CONFIG.endpoint)}</code> 上生效。
-    请改用正式链接打开本应用后再登录。`
-  box.classList.remove('hidden')
-}
-
-function guardOfficialOrigin() {
-  if (isOfficialOrigin()) return true
-  showAuthError(`登录与云数据只在正式域名 ${PUBLIC_CONFIG.endpoint}/ 上可用，请改用该链接打开本应用。`)
-  return false
-}
 
 function showAuthError(msg) {
   const box = $('#auth-error')
@@ -268,8 +211,7 @@ function bindAuth() {
       const email = form.querySelector('input[name="email"]').value.trim()
       if (!email) return showAuthError('请先填写邮箱')
       showAuthError('')
-      if (!guardOfficialOrigin()) return
-      let sent = false
+        let sent = false
       await withLoading(btn, '发送中…', async () => {
         try {
           otpChallenges[scope] = { email, payload: await sendVerificationCode(scope, email) }
@@ -291,7 +233,6 @@ function bindAuth() {
     const email = form.email.value.trim()
     const password = form.password.value
     showAuthError('')
-    if (!guardOfficialOrigin()) return
     await withLoading(btn, '登录中…', async () => {
       try {
         const { error } = await db.auth.signInWithPassword(email, password)
@@ -314,7 +255,6 @@ function bindAuth() {
     const email = form.email.value.trim()
     const token = form.code.value.trim()
     showAuthError('')
-    if (!guardOfficialOrigin()) return
     const challenge = takeChallenge('login-otp', email)
     if (!challenge) return showAuthError('请先点「发送验证码」获取邮箱验证码，再填入下方')
     await withLoading(btn, '登录中…', async () => {
@@ -340,7 +280,6 @@ function bindAuth() {
     const token = form.code.value.trim()
     const password = form.password.value
     showAuthError('')
-    if (!guardOfficialOrigin()) return
     const challenge = takeChallenge('signup', email)
     if (!challenge) return showAuthError('请先点「发送验证码」获取邮箱验证码，再填入下方')
     await withLoading(btn, '注册中…', async () => {
@@ -383,7 +322,6 @@ function bindAuth() {
     const nonce = form.code.value.trim()
     const password = form.password.value
     showAuthError('')
-    if (!guardOfficialOrigin()) return
     const challenge = takeChallenge('reset', email)
     if (!challenge) return showAuthError('请先点「发送验证码」获取密码重置验证码，再填入下方')
     await withLoading(btn, '处理中…', async () => {
@@ -470,7 +408,7 @@ async function loadSettingsFromCloud() {
       return
     }
   } catch (err) {
-    console.warn('[settings] 读取云端设置失败，沿用本地缓存：', describeError(err))
+    console.warn('[settings] 读取服务器设置失败，沿用本地缓存：', describeError(err))
     return
   }
   useSettings(normalizeSettings(DEFAULT_SETTINGS))
@@ -484,11 +422,11 @@ async function saveSettingsNow() {
       effect: state.settings.effect,
       ai: state.settings.ai,
     })
-    settingsPanelCtl?.setStatus('已保存到云端')
+    settingsPanelCtl?.setStatus('已保存到服务器')
   } catch (err) {
     const msg = describeError(err)
     settingsPanelCtl?.setStatus(`保存失败：${msg}`)
-    toast(`设置未保存到云端：${msg}`, 'error', 5000)
+    toast(`设置未保存到服务器：${msg}`, 'error', 5000)
   }
 }
 
@@ -504,7 +442,7 @@ function openSettings() {
   if (!host || !host.classList.contains('hidden')) return
   closeNav()
   settingsPanelCtl = mountSettingsPanel(host, state.settings, onSettingsChange, {
-    // 模型目录由云服务提供；设置模块不直接依赖 cloud.js，这里注入进去
+    // 模型目录由自建 API 提供；设置模块只依赖注入的加载函数
     loadModels: () => db.listModels(),
   })
   host.classList.remove('hidden')

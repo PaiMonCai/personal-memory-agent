@@ -1,24 +1,32 @@
 # Database
 
-This directory is the version-controlled database contract for Personal Memory Agent.
+The project now uses a normal self-hosted PostgreSQL 16 database. The browser never connects to PostgreSQL directly; only the Hono API has `DATABASE_URL`.
 
-## Baseline
+## New installation
 
-`001_baseline.sql` defines the tables, indexes, RLS policies and RPC functions used by the frontend:
+The Docker stack mounts `database/001_baseline.sql` into PostgreSQL's initialization directory, so a fresh empty volume is initialized automatically.
 
+Manual setup:
+
+```bash
+createdb pma
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f database/001_baseline.sql
+```
+
+The baseline contains:
+
+- `users` — local email/password accounts
+- `sessions` — revocable HttpOnly-cookie sessions; only token hashes are stored
+- `auth_codes` — one-time email verification challenges
 - `entries`, `entry_links`, `entry_chunks`, `reviews`, `preferences`
-- `pma_search_entries` — keyword search
-- `pma_retrieve_entries` — ranked retrieval for Ask
-- `pma_replace_links` — atomic relation replacement
-- `pma_delete_entry` — atomic entry delete with FK cascades
-- `pma_replace_entry_chunks` — atomic chunk refresh
+- `ai_usage` — daily server-side AI quota accounting
 
-The SQL assumes PostgreSQL and a Supabase-style `auth.uid()` function, which matches the current cloud runtime.
+## Security boundary
 
-## Rollout
+PostgreSQL must stay on a private Docker/network interface. Do not publish port 5432 to the Internet. Every data query in the API includes the authenticated `owner_id`, and all foreign keys cascade on account deletion.
 
-For a **new environment**, apply `001_baseline.sql` top-to-bottom.
+Custom-provider API keys inside `preferences.ai` are encrypted by the API using AES-256-GCM. Configure a stable `PREFERENCES_ENCRYPTION_KEY` before users save those settings; changing that key later makes existing encrypted provider keys unreadable.
 
-For an **existing production database**, do not blindly re-run the baseline. Compare the live schema first, back it up, then port the relevant DDL/functions as a migration. The frontend keeps compatibility fallbacks for the new RPCs so code deployment does not require the database rollout to happen in the same instant.
+## Existing data
 
-`entry_chunks` is intentionally text-only for now. It gives long documents a stable chunk model without committing the project to a vector extension or embedding provider before those capabilities are available in the backend.
+Do not point the new server at an old provider-managed database and run this baseline over it. Create a clean self-hosted database, export the user data you want to keep, create the matching local account, then import rows under that local user's new UUID. Keep an offline backup until the migration has been verified.

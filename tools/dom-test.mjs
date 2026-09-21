@@ -7,11 +7,7 @@
  *   npm install jsdom --prefix <某个目录>
  *   NODE_PATH=<那个目录>/node_modules node tools/dom-test.mjs
  *
- * 例：
- *   NODE_PATH=C:\Users\me\.workbuddy\binaries\node\workspace\node_modules \
- *     node tools/dom-test.mjs
- *
- * 说明：云服务 SDK 用结构对齐的假实现替换，因此不发任何真实请求。
+ * 说明：自建 /api 用 fetch 假实现替换，因此不发任何真实网络请求。
  */
 import fs from 'node:fs'
 import os from 'node:os'
@@ -47,7 +43,7 @@ for (const f of fs.readdirSync(SRC).filter((n) => n.endsWith('.js'))) {
 // ---------- 2) 搭 DOM 环境
 const html = fs.readFileSync(path.join(APP, 'index.html'), 'utf8')
 const dom = new JSDOM(html, {
-  url: 'https://personal-memory-agent-50179.app.workbuddy.host/',
+  url: 'https://memory.example.test/',
   pretendToBeVisual: true,
   runScripts: 'outside-only',
 })
@@ -115,15 +111,9 @@ setGlobal('getComputedStyle', window.getComputedStyle.bind(window))
 setGlobal('requestAnimationFrame', (cb) => setTimeout(() => cb(performance.now()), 16))
 setGlobal('cancelAnimationFrame', (id) => clearTimeout(id))
 
-// ---------- 3) 假 SDK（结构对齐真实契约，不发请求）
-const anyChain = (result) => {
-  const p = Promise.resolve(result)
-  const base = { then: p.then.bind(p), catch: p.catch.bind(p), finally: p.finally.bind(p) }
-  return new Proxy(base, { get: (t, k) => (k in t ? t[k] : () => anyChain(result)) })
-}
-const empty = { data: [], error: null }
+// ---------- 3) 假自建 API（结构对齐浏览器客户端，不发请求）
 const now = new Date().toISOString()
-const entryRow = {
+let entryRow = {
   id: 1,
   raw_text: '把收件箱改成侧栏布局',
   title: '收件箱改成侧栏布局',
@@ -139,61 +129,72 @@ const entryRow = {
   created_at: now,
   updated_at: now,
 }
-// 偏好表做成"能记住写入"的。若当成空表，savePreferences 每次都会抛
-// "设置未能保存到云端" —— 保存这条路径就成了测试盲区（AI 设置尤其要验这个）。
 let prefsRow = null
-const prefsFrom = () => {
-  const p = Promise.resolve({ data: prefsRow ? [prefsRow] : [], error: null })
-  const base = { then: p.then.bind(p), catch: p.catch.bind(p), finally: p.finally.bind(p) }
-  return new Proxy(base, {
-    get(t, k) {
-      if (k in t) return t[k]
-      if (k === 'upsert') {
-        return (row) => {
-          window.__prefsWrite = row
-          prefsRow = { id: 1, ...(prefsRow || {}), ...row }
-          return prefsFrom()
-        }
-      }
-      return () => prefsFrom()
-    },
-  })
-}
 
-window.WorkBuddyCloud = {
-  createWorkBuddyCloud: () => ({
-    config: {},
-    auth: {
-      getSession: async () => ({ data: { user: { email: 'tester@example.com' } }, error: null }),
-      onAuthStateChange: () => () => {},
-      signOut: async () => ({ error: null }),
-      signInWithPassword: async () => ({ data: null, error: { message: 'stub' } }),
-      sendOtp: async () => ({ data: { verificationId: 'v1', isExistingUser: false }, error: null }),
-      signInWithOtp: async () => ({ data: { verify: async () => ({ data: {}, error: null }) }, error: null }),
-      verifyOtp: async () => ({ data: {}, error: null }),
-      resetPasswordForEmail: async () => ({ data: { updateUser: async () => ({}) }, error: null }),
-    },
-    database: {
-      from: (table) => {
-        if (table === 'entries') return anyChain({ data: [entryRow], error: null })
-        if (table === 'preferences') return prefsFrom()
-        return anyChain(empty)
-      },
-      rpc: () => anyChain(empty),
-    },
-    llm: {
-      // 模型目录给两个可用 + 一个停用：设置面板要能验"停用的不出现"
-      models: {
-        list: async () => [
-          { id: 'wb-fast', provider: '内置' },
-          { id: 'wb-strong', provider: '内置' },
-          { id: 'wb-retired', provider: '内置', disabled: true },
-        ],
-      },
-      chat: { completions: { create: async function* () {} } },
-    },
-  }),
-}
+const jsonResponse = (data, status = 200) =>
+  new Response(JSON.stringify(data), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  })
+
+setGlobal('fetch', async (input, init = {}) => {
+  const url = new URL(String(input), window.location.href)
+  const p = url.pathname
+  const method = String(init.method || 'GET').toUpperCase()
+  const body = init.body ? JSON.parse(init.body) : {}
+
+  if (p === '/api/health') return jsonResponse({ ok: true })
+  if (p === '/api/auth/session') {
+    return jsonResponse({ session: { user: { id: 'u1', email: 'tester@example.com' } } })
+  }
+  if (p === '/api/auth/logout') return jsonResponse({ ok: true })
+  if (p === '/api/auth/password/login') return jsonResponse({ user: { id: 'u1', email: 'tester@example.com' } })
+  if (p === '/api/auth/otp/request') {
+    return jsonResponse({ challengeId: 'challenge-1', isExistingUser: false })
+  }
+  if (p === '/api/auth/otp/verify-login' || p === '/api/auth/signup' || p === '/api/auth/password/reset') {
+    return jsonResponse({ user: { id: 'u1', email: 'tester@example.com' } })
+  }
+
+  if (p === '/api/entries/retrieve' && method === 'POST') return jsonResponse([entryRow])
+  if (p === '/api/entries' && method === 'GET') return jsonResponse([entryRow])
+  if (p === '/api/entries' && method === 'POST') return jsonResponse(entryRow, 201)
+  if (/^\/api\/entries\/\d+$/.test(p) && method === 'PATCH') {
+    entryRow = { ...entryRow, ...body, updated_at: new Date().toISOString() }
+    return jsonResponse(entryRow)
+  }
+  if (/^\/api\/entries\/\d+$/.test(p) && method === 'DELETE') return jsonResponse({ ok: true })
+  if (/^\/api\/entries\/\d+\/links$/.test(p)) return jsonResponse(method === 'PUT' ? [] : { ok: true })
+  if (/^\/api\/entries\/\d+\/chunks$/.test(p)) return jsonResponse({ ok: true })
+  if (p === '/api/links') return jsonResponse([])
+
+  if (p === '/api/reviews' && method === 'GET') return jsonResponse([])
+  if (p === '/api/reviews' && method === 'POST') return jsonResponse({ id: 1, ...body, created_at: now }, 201)
+  if (/^\/api\/reviews\/\d+$/.test(p) && method === 'DELETE') return jsonResponse({ ok: true })
+
+  if (p === '/api/preferences' && method === 'GET') return jsonResponse(prefsRow)
+  if (p === '/api/preferences' && method === 'PUT') {
+    window.__prefsWrite = body
+    prefsRow = { ...body, updated_at: new Date().toISOString() }
+    return jsonResponse(prefsRow)
+  }
+
+  if (p === '/api/ai/models') {
+    return jsonResponse([
+      { id: 'local-fast', provider: 'self-hosted' },
+      { id: 'local-strong', provider: 'self-hosted' },
+      { id: 'local-retired', provider: 'self-hosted', disabled: true },
+    ])
+  }
+  if (p === '/api/ai/chat') {
+    return new Response('data: [DONE]\n\n', {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    })
+  }
+
+  return jsonResponse({ error: { code: 'not_found', message: p } }, 404)
+})
 
 // ---------- 4) 加载被测应用
 const errors = []
@@ -754,29 +755,29 @@ console.log('\n[15] AI 模型设置')
   const modeTabs = panel.querySelectorAll('[data-ai-mode]')
   ok(modeTabs.length === 2, `模型来源两个选项（实际 ${modeTabs.length}）`)
 
-  // 云服务模式：目录里停用的模型不该出现
+  // 服务器模式：目录里停用的模型不该出现
   const names = Array.from(panel.querySelectorAll('[data-ai-model]')).map(
     (b) => b.dataset.aiModel
   )
   ok(names.includes(''), '列表含「自动」项')
-  ok(names.includes('wb-fast') && names.includes('wb-strong'), '列出可用模型')
-  ok(!names.includes('wb-retired'), '停用的模型不出现在列表里')
+  ok(names.includes('local-fast') && names.includes('local-strong'), '列出可用模型')
+  ok(!names.includes('local-retired'), '停用的模型不出现在列表里')
   ok(
     panel.querySelector('[data-ai-mode="cloud"]').classList.contains('active'),
-    '默认在云服务模式'
+    '默认在服务器模式'
   )
 
   // 选一个具体模型 → 写进设置并落盘
-  panel.querySelector('[data-ai-model="wb-strong"]').click()
+  panel.querySelector('[data-ai-model="local-strong"]').click()
   await frame()
   ok(
-    panel.querySelector('[data-ai-model="wb-strong"]').classList.contains('active'),
+    panel.querySelector('[data-ai-model="local-strong"]').classList.contains('active'),
     '选中的模型被标记'
   )
   await new Promise((r) => setTimeout(r, 900)) // 等防抖保存
   const saved = window.__prefsWrite || {}
   ok(!!saved.ai, '设置里带上了 ai 配置')
-  ok(saved.ai && saved.ai.modelId === 'wb-strong', `选中的模型已写入（${saved.ai && saved.ai.modelId}）`)
+  ok(saved.ai && saved.ai.modelId === 'local-strong', `选中的模型已写入（${saved.ai && saved.ai.modelId}）`)
 
   // 手填一个目录外的 ID 也要能用
   const manual = panel.querySelector('[data-set="ai.modelId"]')
@@ -800,7 +801,7 @@ console.log('\n[15] AI 模型设置')
   )
   ok(
     panel.querySelector('[data-ai-pane="cloud"]').className.indexOf('is-off') >= 0,
-    '云服务面板收起'
+    '服务器面板收起'
   )
   ok(
     panel.querySelector('[data-ai-mode="custom"]').getAttribute('aria-selected') === 'true',

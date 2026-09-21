@@ -6,10 +6,10 @@
  */
 // 版本参数必须与 index.html 中的引用一致，且同一模块在所有文件中写法必须完全相同，
 // 否则 ES module 会被当成两个不同模块加载（cloud.js 会出现两个 SDK 客户端实例）。
-import { PUBLIC_CONFIG } from './config.js?v=20260922r'
-import * as db from './cloud.js?v=20260922r'
-import { describeError } from './cloud.js?v=20260922r'
-import * as ai from './ai.js?v=20260922r'
+import { PUBLIC_CONFIG } from './config.js?v=20260922s'
+import * as db from './cloud.js?v=20260922s'
+import { describeError } from './cloud.js?v=20260922s'
+import * as ai from './ai.js?v=20260922s'
 import {
   escapeHtml,
   kindMeta,
@@ -24,14 +24,14 @@ import {
   toast,
   confirmDialog,
   debounce,
-} from './ui.js?v=20260922r'
+} from './ui.js?v=20260922s'
 import {
   applySettings,
   mountSettingsPanel,
   normalizeSettings,
   DEFAULT_SETTINGS,
-} from './settings.js?v=20260922r'
-import { initEffects, setEffect } from './effects.js?v=20260922r'
+} from './settings.js?v=20260922s'
+import { initEffects, setEffect } from './effects.js?v=20260922s'
 
 /* ==================================================================== 状态 */
 

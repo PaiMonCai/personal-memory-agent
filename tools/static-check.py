@@ -328,11 +328,11 @@ check('浏览器数据层只访问 /api', "constAPI=String(APP_CONFIG.apiBase||'
 check('默认 AI 经服务器代理', 'forawait(constchunkofstreamChat(params))' in ajs)
 check('服务端数据查询按 owner_id 隔离', 'whereowner_id=$1' in server_data)
 check('关联替换使用数据库事务', 'awaittx(async(client)=>' in server_data and 'deletefromentry_linkswhereowner_id=$1andsource_id=$2' in server_data)
-check('会话 Cookie 为 HttpOnly', 'httponly:true' in server_auth)
+check('会话 Cookie 为 HttpOnly', 'httpOnly:true' in server_auth)
 check('数据库只保存会话 token 哈希', 'token_hash' in server_auth and 'sha256(token)' in server_auth)
 check('邮箱验证码有频控与尝试次数限制', 'otpMaxPerHour' in server_auth and 'attempts>=5' in server_auth)
 check('默认 AI 有按用户每日额度', 'ai_usage' in server_ai and 'dailyLimit' in server_ai)
-check('自定义供应商 API Key 使用 AES-256-GCM', "createcipheriv('aes-256-gcm'" in server_crypto)
+check('自定义供应商 API Key 使用 AES-256-GCM', "createCipheriv('aes-256-gcm'" in server_crypto)
 
 db_sql = (ROOT / 'database' / '001_baseline.sql').read_text(encoding='utf-8')
 check('自建数据库包含本地账号与会话表',
@@ -352,7 +352,7 @@ for path in ROOT.rglob('*'):
         text = path.read_text(encoding='utf-8').lower()
     except UnicodeDecodeError:
         continue
-    if 'workbuddy' in text or 'wbpk_' in text:
+    legacy_name = 'work' + 'buddy'\n    legacy_key = 'wb' + 'pk_'\n    if legacy_name in text or legacy_key in text:
         forbidden_hits.append(str(path.relative_to(ROOT)))
 check(f'旧平台代码与标识已彻底清除（{forbidden_hits or "无"}）', not forbidden_hits)
 

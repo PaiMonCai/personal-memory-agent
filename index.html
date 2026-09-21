@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>信息管家 · 个人信息管家 Agent</title>
+  <meta name="description" content="记录零散想法、资料与待办，自动分类、总结、关联，并支持检索、问答与阶段复盘。" />
+  <link rel="stylesheet" href="assets/style.css?v=20260922q" />
+</head>
+<body>
+
+  <a class="skip-link" href="#main-content">跳到主要内容</a>
+
+  <!-- 背景层：渐变由 body 负责，这里放自定义背景图与遮罩；动效画布在其上、内容之下 -->
+  <div class="bg-layer" aria-hidden="true">
+    <div class="bg-image"></div>
+    <div class="bg-overlay"></div>
+  </div>
+  <canvas id="fx-layer" aria-hidden="true"></canvas>
+
+  <!-- 启动遮罩 -->
+  <div id="boot" class="boot">
+    <div class="boot-inner">
+      <div class="boot-logo">🐾</div>
+      <div class="boot-text">正在连接云端…</div>
+    </div>
+  </div>
+
+  <!-- 未登录 -->
+  <div id="auth-view" class="auth hidden">
+    <div class="auth-brand">
+      <div class="auth-brand-inner">
+        <div class="brand-mark">🐾</div>
+        <h1>信息管家</h1>
+        <p class="auth-slogan">零散想法、资料与待办的统一收件箱</p>
+        <ul class="auth-points">
+          <li><span>✦</span> 随手记下，AI 自动分类、摘要、提炼重点</li>
+          <li><span>✦</span> 自动发现内容之间的关联，不再孤立</li>
+          <li><span>✦</span> 关键词检索与智能问答，随时找回记忆</li>
+          <li><span>✦</span> 待办整理与阶段复盘，给出下一步行动</li>
+        </ul>
+        <p class="auth-foot">数据保存在云端，与账号绑定，换设备也能接着用。</p>
+      </div>
+    </div>
+
+    <div class="auth-panel">
+      <div class="auth-warn hidden" id="origin-warning"></div>
+      <div class="auth-card">
+        <div class="auth-tabs" role="tablist">
+          <button class="auth-tab active" data-auth-tab="login" role="tab">登录</button>
+          <button class="auth-tab" data-auth-tab="signup" role="tab">注册</button>
+        </div>
+
+        <!-- 登录 -->
+        <div class="auth-body" data-auth-panel="login">
+          <div class="seg" id="login-mode">
+            <button class="seg-btn active" data-login-mode="password">密码登录</button>
+            <button class="seg-btn" data-login-mode="otp">验证码登录</button>
+          </div>
+
+          <form id="form-login-password" class="form">
+            <label class="field">
+              <span>邮箱</span>
+              <input type="email" name="email" autocomplete="email" placeholder="you@example.com" required />
+            </label>
+            <label class="field">
+              <span>密码</span>
+              <input type="password" name="password" autocomplete="current-password" placeholder="请输入密码" required />
+            </label>
+            <button type="submit" class="btn btn-primary btn-block">登录</button>
+            <div class="form-links">
+              <button type="button" class="link" data-goto="reset">忘记密码？</button>
+            </div>
+          </form>
+
+          <form id="form-login-otp" class="form hidden">
+            <label class="field">
+              <span>邮箱</span>
+              <input type="email" name="email" autocomplete="email" placeholder="you@example.com" required />
+            </label>
+            <div class="field">
+              <span>验证码</span>
+              <div class="inline">
+                <input type="text" name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="6 位验证码" required />
+                <button type="button" class="btn btn-ghost" data-send-otp="login-otp">发送验证码</button>
+              </div>
+            </div>
+            <button type="submit" class="btn btn-primary btn-block">登录</button>
+          </form>
+        </div>
+
+        <!-- 注册 -->
+        <div class="auth-body hidden" data-auth-panel="signup">
+          <form id="form-signup" class="form">
+            <label class="field">
+              <span>邮箱</span>
+              <input type="email" name="email" autocomplete="email" placeholder="you@example.com" required />
+            </label>
+            <div class="field">
+              <span>验证码</span>
+              <div class="inline">
+                <input type="text" name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="6 位验证码" required />
+                <button type="button" class="btn btn-ghost" data-send-otp="signup">发送验证码</button>
+              </div>
+            </div>
+            <label class="field">
+              <span>设置密码</span>
+              <input type="password" name="password" autocomplete="new-password" placeholder="至少 8 位" required minlength="8" />
+            </label>
+            <button type="submit" class="btn btn-primary btn-block">注册并登录</button>
+            <p class="form-note">注册需要先验证邮箱，验证码会发送到上面的邮箱地址。</p>
+          </form>
+        </div>
+
+        <!-- 重置密码 -->
+        <div class="auth-body hidden" data-auth-panel="reset">
+          <form id="form-reset" class="form">
+            <label class="field">
+              <span>邮箱</span>
+              <input type="email" name="email" autocomplete="email" placeholder="you@example.com" required />
+            </label>
+            <div class="field">
+              <span>验证码</span>
+              <div class="inline">
+                <input type="text" name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="6 位验证码" required />
+                <button type="button" class="btn btn-ghost" data-send-otp="reset">发送验证码</button>
+              </div>
+            </div>
+            <label class="field">
+              <span>新密码</span>
+              <input type="password" name="password" autocomplete="new-password" placeholder="至少 8 位" required minlength="8" />
+            </label>
+            <button type="submit" class="btn btn-primary btn-block">重置密码并登录</button>
+            <div class="form-links">
+              <button type="button" class="link" data-goto="login">返回登录</button>
+            </div>
+          </form>
+        </div>
+
+        <p class="auth-err hidden" id="auth-error" role="alert"></p>
+      </div>
+      <p class="auth-tip">请在发布后的正式域名下使用登录功能。</p>
+    </div>
+  </div>
+
+  <!-- 已登录 -->
+  <div id="app-view" class="app hidden">
+    <!-- 侧栏：竖向导航 + 随手记 + 账号操作。左右位置由「个性设置」决定 -->
+    <aside class="sidebar" id="sidebar" aria-label="主导航">
+      <button type="button" class="float-grip" data-grip="sidebar"
+              title="上下拖动调整位置（↑ ↓ 微调，Home 回正）"
+              aria-label="拖动调整导航栏上下位置"><span aria-hidden="true"></span></button>
+      <div class="side-brand">
+        <div class="logo">🐾</div>
+        <div class="brand">
+          <strong>信息管家</strong>
+          <span>个人记忆与待办</span>
+        </div>
+      </div>
+
+      <nav class="side-nav" id="tabs" aria-label="视图切换">
+        <button class="side-tab active" data-view="inbox" aria-current="page"><span aria-hidden="true">📥</span> 收件箱</button>
+        <button class="side-tab" data-view="todo"><span aria-hidden="true">✅</span> 待办</button>
+        <button class="side-tab" data-view="ask"><span aria-hidden="true">💬</span> 问答</button>
+        <button class="side-tab" data-view="review"><span aria-hidden="true">📊</span> 复盘</button>
+      </nav>
+
+      <p class="side-hint" aria-hidden="true">↑↓ 切换视图 · ←→ 切换栏目</p>
+    </aside>
+
+    <div class="app-main">
+      <header class="topbar">
+        <button class="icon-btn nav-toggle" id="nav-toggle" type="button"
+                aria-label="打开导航" aria-expanded="false" aria-controls="sidebar">
+          <span class="burger" aria-hidden="true"></span>
+        </button>
+        <div class="topbar-search">
+          <input id="global-search" type="search" placeholder="搜索记录…（回车检索，支持关键词）"
+                 autocomplete="off" aria-label="搜索记录" />
+          <button class="btn btn-ghost btn-sm" id="search-clear" hidden>清除</button>
+        </div>
+        <button class="icon-btn rail-toggle" id="rail-toggle" type="button"
+                aria-label="打开随手记" aria-expanded="false" aria-controls="compose-rail">
+          <span aria-hidden="true">＋</span>
+        </button>
+      </header>
+
+      <main class="main" id="main-content" tabindex="-1">
+        <section class="view" id="view-inbox"></section>
+        <section class="view hidden" id="view-todo"></section>
+        <section class="view hidden" id="view-ask"></section>
+        <section class="view hidden" id="view-review"></section>
+      </main>
+    </div>
+
+    <!-- 右栏：随手记。窄屏下从右侧滑出成抽屉 -->
+    <aside class="compose-rail" id="compose-rail" aria-label="随手记">
+      <button type="button" class="float-grip" data-grip="rail"
+              title="上下拖动调整位置（↑ ↓ 微调，Home 回正）"
+              aria-label="拖动调整随手记上下位置"><span aria-hidden="true"></span></button>
+      <div class="rail-head">
+        <h2>随手记</h2>
+        <div class="rail-head-actions">
+          <button type="button" class="link rail-upload" id="btn-upload-md"
+                  title="上传 .md 文件（也可以直接把文件拖进来）" aria-label="上传 .md 文件">
+            <span aria-hidden="true">📎</span>
+          </button>
+          <button type="button" class="icon-btn rail-close" id="rail-close" aria-label="收起随手记">✕</button>
+        </div>
+      </div>
+      <textarea id="capture-input" placeholder="一个想法、一段资料、一件要做的事…"></textarea>
+      <div class="ai-stage hidden" id="ai-stage"><div class="spinner"></div><span id="ai-stage-text">正在分析…</span></div>
+      <button class="btn btn-primary btn-block" id="btn-capture">记录</button>
+      <p class="rail-hint">保存后会自动分类、生成摘要并找出关联。把 .md 文件拖进来可以批量导入。</p>
+      <div class="rail-drop-hint" id="rail-drop-hint">松开即导入 .md</div>
+      <input type="file" id="md-file" accept=".md,.markdown,.mdx,.txt,text/markdown" multiple hidden />
+    </aside>
+
+    <!-- 账号与操作：悬浮在右下角。窄屏时移到底部居中，避开两侧抽屉 -->
+    <div class="corner-actions">
+      <span class="user-chip" id="user-chip" title="当前账号"></span>
+      <button class="btn btn-ghost btn-sm corner-btn" id="btn-settings" title="个性设置">
+        <span class="gear" aria-hidden="true">⚙</span> 设置
+      </button>
+      <button class="btn btn-ghost btn-sm corner-btn" id="btn-logout">退出</button>
+    </div>
+  </div>
+
+  <!-- 窄屏下侧栏或右栏以抽屉形式出现时，用它遮住主区并接收点击关闭 -->
+  <div class="sidebar-scrim" id="sidebar-scrim" hidden></div>
+
+  <!-- 条目详情抽屉 -->
+  <div class="drawer-mask hidden" id="drawer-mask"></div>
+  <aside class="drawer hidden" id="drawer" role="dialog" aria-modal="true" aria-label="条目详情"></aside>
+
+  <!-- 个性设置面板 -->
+  <div class="settings-mask hidden" id="settings-mask"></div>
+  <aside class="settings-panel hidden" id="settings-panel" role="dialog" aria-modal="true" aria-label="个性设置"></aside>
+
+  <div id="toast-host" class="toast-host" role="status" aria-live="polite" aria-atomic="false"></div>
+  <!-- 键盘切换视图 / 栏目的播报：视觉上隐藏，只给屏幕阅读器。
+       别复用 toast —— 每切一格弹一个浮层太吵。 -->
+  <div id="key-live" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+  <div id="modal-host"></div>
+
+  <!-- 云服务 SDK（无构建步骤的项目使用 CDN 的 IIFE 版本，暴露全局 WorkBuddyCloud） -->
+  <script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
+  <!--
+    资源引用带版本指纹：CDN 边缘会缓存 JS/CSS，重新发布后无参数地址仍会命中旧副本
+    （实测 app.js 被 HIT 住 23 分钟）。每次发布请同步递增下面的版本号。
+  -->
+  <script type="module" src="assets/js/app.js?v=20260922q"></script>
+</body>
+</html>

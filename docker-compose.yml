@@ -1,0 +1,50 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pma
+      POSTGRES_USER: pma
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    volumes:
+      - pma_postgres:/var/lib/postgresql/data
+      - ./database/001_baseline.sql:/docker-entrypoint-initdb.d/001_baseline.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pma -d pma"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [pma]
+
+  api:
+    image: node:22-alpine
+    restart: unless-stopped
+    working_dir: /app
+    command: sh -c "npm install --omit=dev && npm start"
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://pma:${POSTGRES_PASSWORD:-change-me}@postgres:5432/pma
+    volumes:
+      - ./:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [pma]
+
+  web:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - ./index.html:/usr/share/nginx/html/index.html:ro
+      - ./assets:/usr/share/nginx/html/assets:ro
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on: [api]
+    networks: [pma]
+
+networks:
+  pma:
+
+volumes:
+  pma_postgres:

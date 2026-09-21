@@ -17,15 +17,13 @@ services:
     networks: [pma]
 
   api:
-    image: node:22-alpine
+    build:
+      context: .
+      dockerfile: Dockerfile
     restart: unless-stopped
-    working_dir: /app
-    command: sh -c "npm install --omit=dev && npm start"
     env_file: .env
     environment:
       DATABASE_URL: postgres://pma:${POSTGRES_PASSWORD:-change-me}@postgres:5432/pma
-    volumes:
-      - ./:/app
     depends_on:
       postgres:
         condition: service_healthy

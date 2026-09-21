@@ -1,0 +1,10 @@
+.git
+.github
+.env
+node_modules
+assets
+database
+deploy
+tools
+index.html
+README.md

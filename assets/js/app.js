@@ -750,6 +750,31 @@ function entryById(id) {
   return state.entries.find((e) => e.id === id)
 }
 
+/** 把长文本切成稳定的小段，给数据库检索/后续语义索引使用。 */
+function memoryChunks(text, maxChars = 1800, overlap = 180) {
+  const src = String(text || '').replace(/\r\n/g, '\n').trim()
+  if (!src) return []
+  if (src.length <= maxChars) return [src]
+
+  const chunks = []
+  let start = 0
+  while (start < src.length) {
+    let end = Math.min(start + maxChars, src.length)
+    if (end < src.length) {
+      const floor = Math.min(end, start + Math.floor(maxChars * 0.6))
+      const window = src.slice(floor, end)
+      const rel = Math.max(window.lastIndexOf('\n\n'), window.lastIndexOf('\n'), window.lastIndexOf('。'))
+      if (rel >= 0) end = floor + rel + 1
+    }
+    if (end <= start) end = Math.min(start + maxChars, src.length)
+    const chunk = src.slice(start, end).trim()
+    if (chunk) chunks.push(chunk)
+    if (end >= src.length) break
+    start = Math.max(start + 1, end - overlap)
+  }
+  return chunks
+}
+
 /* ================================================================ 视图层 */
 
 let lastRenderedView = null
@@ -1641,6 +1666,13 @@ async function saveEntryAndAnalyze(rawText, { titleHint = '' } = {}) {
   state.analyzing.add(created.id)
   renderView()
 
+  // 分块属于检索索引，不应因为索引暂时失败而阻断主记录/AI 分析流程。
+  try {
+    await db.replaceEntryChunks(created.id, memoryChunks(rawText))
+  } catch (err) {
+    console.warn('[chunks] 写入失败，继续分析主记录：', describeError(err))
+  }
+
   try {
     const result = await ai.analyzeEntry({
       rawText,
@@ -1812,8 +1844,7 @@ async function commitDelete(id) {
   if (!pendingDeletes.has(id)) return
   pendingDeletes.delete(id)
   try {
-    await db.deleteLinksFor(id)
-    await db.deleteEntry(id)
+    await db.deleteEntryWithLinks(id)
     state.entries = state.entries.filter((x) => x.id !== id)
     state.searchResults = state.searchResults.filter((x) => x.id !== id)
     state.links = state.links.filter((l) => l.source_id !== id && l.target_id !== id)
@@ -1831,6 +1862,11 @@ async function reanalyzeEntry(id) {
   renderView()
   openEntry(id)
   try {
+    try {
+      await db.replaceEntryChunks(id, memoryChunks(e.raw_text))
+    } catch (err) {
+      console.warn('[chunks] 刷新失败，继续重新分析：', describeError(err))
+    }
     const result = await ai.analyzeEntry({
       rawText: e.raw_text,
       existingEntries: state.entries.filter((x) => x.id !== id),
@@ -1909,7 +1945,8 @@ async function handleAsk() {
   state.ask.busy = true
   state.ask.messages.push({ role: 'assistant', content: '' })
   const assistant = state.ask.messages[state.ask.messages.length - 1]
-  state.ask.controller = new AbortController()
+  const controller = new AbortController()
+  state.ask.controller = controller
   renderAsk()
 
   const history = state.ask.messages
@@ -1918,11 +1955,20 @@ async function handleAsk() {
     .filter((m) => m.content)
 
   try {
+    let contextEntries = activeEntries().slice(0, 120)
+    try {
+      const retrieved = await db.retrieveEntries({ query: text, limit: 40 })
+      if (retrieved?.length) contextEntries = retrieved
+    } catch (err) {
+      // 检索层故障时仍可用最近记录回答；不要把检索故障升级成整次问答失败。
+      console.warn('[retrieval] 检索失败，回退最近记录：', describeError(err))
+    }
+
     await ai.answerQuestion({
       question: text,
-      entries: activeEntries(),
+      entries: contextEntries,
       history,
-      signal: state.ask.controller.signal,
+      signal: controller.signal,
       onDelta: (d) => {
         assistant.content += d
         const node = document.querySelector('[data-streaming="1"]')
@@ -1942,7 +1988,7 @@ async function handleAsk() {
     }
   } finally {
     state.ask.busy = false
-    state.ask.controller = null
+    if (state.ask.controller === controller) state.ask.controller = null
     renderAsk()
   }
 }

@@ -311,6 +311,29 @@ check('AI 层拿到当前设置', 'ai.useAiSettings(s.ai)' in flat_app2)
 check('本地缓存剔掉密钥', "apiKey:''" in flat_app2 and 'localStorage.setItem(SETTINGS_CACHE_KEY' in flat_app2)
 
 print()
+print('=== [Q] P0-P1 稳定性与记忆检索 ===')
+check('本地缓存逐家剔掉 vendors[] 内的密钥',
+      "vendors:custom.vendors.map((v)=>({...v,apiKey:''}))" in flat_app2)
+check('问答使用局部 AbortController（catch 不会引用未定义变量）',
+      'constcontroller=newAbortController()' in flat_app2
+      and 'signal:controller.signal' in flat_app2
+      and 'state.ask.controller===controller' in flat_app2)
+check('Ask 优先走相关记忆检索', 'db.retrieveEntries({query:text,limit:40})' in flat_app2)
+check('检索失败会回退最近记录', '[retrieval]' in app and 'activeEntries().slice(0,120)' in flat_app2)
+check('长文本会切块并同步索引', 'functionmemoryChunks(' in flat_app2 and 'db.replaceEntryChunks(' in flat_app2)
+check('删除走原子 RPC 兼容层', 'db.deleteEntryWithLinks(id)' in flat_app2)
+check('cloud 暴露排名检索 RPC', "rpc('pma_retrieve_entries'" in cjs)
+check('cloud 暴露原子关联 RPC', "rpc('pma_replace_links'" in cjs)
+check('cloud 暴露原子删除 RPC', "rpc('pma_delete_entry'" in cjs)
+check('cloud 暴露分块刷新 RPC', "rpc('pma_replace_entry_chunks'" in cjs)
+
+db_sql = (ROOT / 'database' / '001_baseline.sql').read_text(encoding='utf-8')
+check('数据库 schema 已纳入版本控制', 'create table if not exists public.entries' in db_sql)
+check('数据库 RLS 已纳入版本控制', 'enable row level security' in db_sql and 'auth.uid()' in db_sql)
+for fn in ['pma_search_entries', 'pma_retrieve_entries', 'pma_replace_links', 'pma_delete_entry', 'pma_replace_entry_chunks']:
+    check(f'数据库函数 {fn} 已定义', f'function public.{fn}' in db_sql)
+
+print()
 if fails:
     print(f'RESULT: {len(fails)} PROBLEM(S) -> {fails}')
     sys.exit(1)

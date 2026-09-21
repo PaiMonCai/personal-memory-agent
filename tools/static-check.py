@@ -352,7 +352,9 @@ for path in ROOT.rglob('*'):
         text = path.read_text(encoding='utf-8').lower()
     except UnicodeDecodeError:
         continue
-    legacy_name = 'work' + 'buddy'\n    legacy_key = 'wb' + 'pk_'\n    if legacy_name in text or legacy_key in text:
+    legacy_name = 'work' + 'buddy'
+    legacy_key = 'wb' + 'pk_'
+    if legacy_name in text or legacy_key in text:
         forbidden_hits.append(str(path.relative_to(ROOT)))
 check(f'旧平台代码与标识已彻底清除（{forbidden_hits or "无"}）', not forbidden_hits)
 

@@ -1,0 +1,72 @@
+name: Quality checks
+
+on:
+  push:
+    branches: [main, "fix/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install DOM test dependency
+        run: npm install --no-save --package-lock=false jsdom@26
+
+      - name: JavaScript syntax
+        run: find assets/js -name '*.js' -print0 | xargs -0 -n1 node --check
+
+      - name: DOM regression tests
+        run: NODE_PATH="$(npm root)" node tools/dom-test.mjs
+
+      - name: Static contract checks
+        run: python tools/static-check.py
+
+      - name: WCAG contrast checks
+        run: python tools/contrast-check.py
+
+      - name: Validate database baseline
+        env:
+          PGPASSWORD: postgres
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client
+          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 <<'SQL'
+          create schema if not exists auth;
+          create or replace function auth.uid()
+          returns uuid
+          language sql
+          stable
+          as 'select ''00000000-0000-0000-0000-000000000001''::uuid';
+          SQL
+          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -f database/001_baseline.sql

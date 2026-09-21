@@ -6,8 +6,8 @@
  *  - 接口只支持流式（stream: true），一次性任务也在这里把 SSE 分片拼成完整文本。
  *  - 每个请求的第一条消息必须是本应用自有的 system 消息。
  */
-import { getCloud, listModels } from './cloud.js?v=20260922r'
-import { customModelIssue, resolveCustomPick } from './settings.js?v=20260922r'
+import { getCloud, listModels } from './cloud.js?v=20260922s'
+import { customModelIssue, resolveCustomPick } from './settings.js?v=20260922s'
 
 const MODEL_CACHE_TTL = 10 * 60 * 1000
 let _model = null

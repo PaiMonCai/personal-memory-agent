@@ -6,7 +6,7 @@
  *  - 所有写操作一律不传 owner_id，由数据库的 DEFAULT auth.uid() 决定归属，RLS 兜底。
  *  - 每个调用都返回 { data, error }，这里统一转成 throw，调用方用 try/catch 处理。
  */
-import { PUBLIC_CONFIG } from './config.js?v=20260922r'
+import { PUBLIC_CONFIG } from './config.js?v=20260922s'
 
 let _cloud = null
 
@@ -101,6 +101,37 @@ export async function searchEntries({ keyword = '', kind = null, status = null }
   )
 }
 
+function rpcMissing(err) {
+  const code = err?.code || err?.error?.code || ''
+  const msg = err?.message || err?.error?.message || ''
+  return (
+    code === 'PGRST202' ||
+    code === '42883' ||
+    /function .* does not exist/i.test(msg) ||
+    /could not find .*function/i.test(msg)
+  )
+}
+
+/**
+ * 为问答取相关记录。新后端走 pma_retrieve_entries 排名检索；
+ * 尚未部署该 RPC 的旧环境退回现有关键词函数，保持滚动发布兼容。
+ */
+export async function retrieveEntries({ query = '', kind = null, status = null, limit = 40 } = {}) {
+  try {
+    return unwrap(
+      await getCloud().database.rpc('pma_retrieve_entries', {
+        query_text: String(query || '').trim(),
+        kind_filter: kind || null,
+        status_filter: status || null,
+        p_limit: Math.max(1, Math.min(Number(limit) || 40, 100)),
+      })
+    )
+  } catch (err) {
+    if (!rpcMissing(err)) throw err
+    return searchEntries({ keyword: String(query || '').trim(), kind, status })
+  }
+}
+
 /** 新建条目：只写原始文本，AI 结果稍后回填 */
 export async function createEntry(rawText) {
   const rows = unwrap(
@@ -145,12 +176,27 @@ export async function listLinks() {
   )
 }
 
-/** 重写某条目的出边关联（先清后写，保证不重复） */
+/** 重写某条目的出边关联。优先走数据库事务 RPC；旧环境回退到兼容路径。 */
 export async function replaceLinks(sourceId, targets, reason) {
+  const cleanTargets = (targets || []).filter((t) => Number.isFinite(t) && t !== sourceId)
+  try {
+    return unwrap(
+      await getCloud().database.rpc('pma_replace_links', {
+        p_source_id: sourceId,
+        p_target_ids: cleanTargets,
+        p_reason: reason || null,
+      })
+    )
+  } catch (err) {
+    if (!rpcMissing(err)) throw err
+  }
+
   await getCloud().database.from('entry_links').delete().eq('source_id', sourceId)
-  const rows = (targets || [])
-    .filter((t) => Number.isFinite(t) && t !== sourceId)
-    .map((targetId) => ({ source_id: sourceId, target_id: targetId, reason: reason || null }))
+  const rows = cleanTargets.map((targetId) => ({
+    source_id: sourceId,
+    target_id: targetId,
+    reason: reason || null,
+  }))
   if (rows.length === 0) return []
   return unwrap(await getCloud().database.from('entry_links').insert(rows).select())
 }
@@ -159,6 +205,40 @@ export async function replaceLinks(sourceId, targets, reason) {
 export async function deleteLinksFor(entryId) {
   await getCloud().database.from('entry_links').delete().eq('source_id', entryId)
   await getCloud().database.from('entry_links').delete().eq('target_id', entryId)
+}
+
+/** 原子删除条目（FK 同事务级联 links/chunks）；旧后端没有 RPC 时走兼容删除。 */
+export async function deleteEntryWithLinks(entryId) {
+  try {
+    const deleted = unwrap(
+      await getCloud().database.rpc('pma_delete_entry', { p_entry_id: entryId })
+    )
+    if (!deleted) throw new Error('没有删除任何内容（条目可能已不存在）')
+    return true
+  } catch (err) {
+    if (!rpcMissing(err)) throw err
+  }
+
+  await deleteLinksFor(entryId)
+  return deleteEntry(entryId)
+}
+
+/** 刷新长文本分块。RPC 未部署时静默跳过，不影响记录主流程。 */
+export async function replaceEntryChunks(entryId, chunks) {
+  const clean = (chunks || [])
+    .filter((x) => typeof x === 'string' && x.trim())
+    .map((x) => x.trim())
+  try {
+    return unwrap(
+      await getCloud().database.rpc('pma_replace_entry_chunks', {
+        p_entry_id: entryId,
+        p_chunks: clean,
+      })
+    )
+  } catch (err) {
+    if (rpcMissing(err)) return null
+    throw err
+  }
 }
 
 /* ------------------------------------------------------------------ 复盘 */

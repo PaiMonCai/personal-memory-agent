@@ -4,8 +4,8 @@
  * 只负责"设置的数据形态 + 应用到界面 + 面板渲染"，不碰云端读写
  * （读写在 cloud.js，保存时机由 app.js 决定）。
  */
-import { escapeHtml } from './ui.js?v=20260922r'
-import { EFFECTS, CUSTOM_LIMITS } from './effects.js?v=20260922r'
+import { escapeHtml } from './ui.js?v=20260922s'
+import { EFFECTS, CUSTOM_LIMITS } from './effects.js?v=20260922s'
 
 /* ------------------------------------------------------------- 主题预设 */
 

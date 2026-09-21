@@ -6,7 +6,7 @@
  *  - 所有写操作一律不传 owner_id，由数据库的 DEFAULT auth.uid() 决定归属，RLS 兜底。
  *  - 每个调用都返回 { data, error }，这里统一转成 throw，调用方用 try/catch 处理。
  */
-import { PUBLIC_CONFIG } from './config.js?v=20260922r'
+import { PUBLIC_CONFIG } from './config.js?v=20260922s'
 
 let _cloud = null
 

@@ -4,8 +4,8 @@
  * 只负责"设置的数据形态 + 应用到界面 + 面板渲染"，不碰云端读写
  * （读写在 cloud.js，保存时机由 app.js 决定）。
  */
-import { escapeHtml } from './ui.js?v=20260922s'
-import { EFFECTS, CUSTOM_LIMITS } from './effects.js?v=20260922s'
+import { escapeHtml } from './ui.js?v=20260922t'
+import { EFFECTS, CUSTOM_LIMITS } from './effects.js?v=20260922t'
 
 /* ------------------------------------------------------------- 主题预设 */
 
@@ -35,7 +35,7 @@ export const DEFAULT_SETTINGS = {
   },
   // custom.code：用户自己写的动效代码（函数体，参数 fx）。存进 effect 列，随设置一起上云。
   effect: { type: 'none', intensity: 1, speed: 1, custom: { code: '' } },
-  // mode='cloud' 时走云服务模型（modelId 空 = 自动挑第一个可用）；
+  // mode='cloud' 时走服务器模型（modelId 空 = 自动挑第一个可用）；
   // mode='custom' 时直连下面填的 OpenAI 兼容接口，不再经过云服务。
   ai: {
     mode: 'cloud',
@@ -614,7 +614,7 @@ export function mountSettingsPanel(host, settings, onChange, opts = {}) {
         <h3>AI 模型</h3>
         <div class="ai-mode" role="tablist" aria-label="模型来源">
           <button type="button" class="ai-mode-tab ${cur.ai.mode === 'cloud' ? 'active' : ''}"
-                  role="tab" aria-selected="${cur.ai.mode === 'cloud'}" data-ai-mode="cloud">云服务模型</button>
+                  role="tab" aria-selected="${cur.ai.mode === 'cloud'}" data-ai-mode="cloud">服务器模型</button>
           <button type="button" class="ai-mode-tab ${cur.ai.mode === 'custom' ? 'active' : ''}"
                   role="tab" aria-selected="${cur.ai.mode === 'custom'}" data-ai-mode="custom">自定义接口</button>
         </div>
@@ -631,7 +631,7 @@ export function mountSettingsPanel(host, settings, onChange, opts = {}) {
               <button type="button" class="btn btn-ghost btn-sm" data-set-act="ai-refresh">刷新</button>
             </div>
           </div>
-          <p class="set-hint">模型由云服务提供，按当前应用的名义调用，不需要你填密钥。
+          <p class="set-hint">模型由自建服务器提供，按当前应用的名义调用，不需要你填密钥。
             目录里没列出的模型也可以手填 ID 试试。</p>
         </div>
 
@@ -842,7 +842,7 @@ export function mountSettingsPanel(host, settings, onChange, opts = {}) {
     if (mode) {
       cur = writeSet('ai.mode', mode.dataset.aiMode)
       commit()
-      // 切到云服务那侧时才去拉目录：自定义模式下这个请求没有意义
+      // 切到服务器那侧时才去拉目录：自定义模式下这个请求没有意义
       if (cur.ai.mode === 'cloud') loadAiModels()
       return
     }
@@ -997,7 +997,7 @@ export function mountSettingsPanel(host, settings, onChange, opts = {}) {
   }, listen)
 
   sync()
-  // 模型目录只在云服务模式下有意义，自定义模式不必发这个请求
+  // 模型目录只在服务器模式下有意义，自定义模式不必发这个请求
   if (cur.ai.mode === 'cloud') loadAiModels()
   return {
     get value() {

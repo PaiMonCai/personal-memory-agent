@@ -63,6 +63,28 @@ docker compose up -d
 http://服务器IP:8080
 ```
 
+## 数据库接入助手
+
+如果 PostgreSQL 不使用仓库内置容器，而是运行在宿主机或独立服务器上，可以直接运行：
+
+```bash
+bash deploy/setup-database.sh
+```
+
+脚本提供两种模式：
+
+- **宿主机 PostgreSQL**：自动检测本机 PostgreSQL。若数据库本身运行在 Docker / 1Panel 容器中，会创建专用 `pma-db-link` 网络并把 API 与数据库容器直接连接；若是系统 PostgreSQL，则自动配置 Docker 到宿主机的访问、数据库用户、数据库、必要扩展与 `pg_hba.conf`。
+- **外部 PostgreSQL**：输入完整 `DATABASE_URL` 后，从与应用相同的 Docker 网络验证连接，并执行数据库基线初始化。
+
+宿主机模式会自动创建或更新 `pma` 应用用户和数据库，并在发现历史表 owner 不一致时调用 `database/repair_ownership.sql` 修复。脚本最后会生成 `.pma-db-compose.yml`，避免原始 `docker-compose.yml` 中内置 PostgreSQL 的 `DATABASE_URL` 覆盖外部配置。
+
+后续启动和查看日志：
+
+```bash
+docker compose -f .pma-db-compose.yml up -d
+docker compose -f .pma-db-compose.yml logs -f api
+```
+
 ## 首次管理员与 SMTP
 
 首次部署不需要提前把 SMTP 配好。

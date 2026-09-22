@@ -67,6 +67,7 @@ function wrapped<T>(promise: Promise<T>): Promise<{ data: T | null; error: ApiEr
 export interface SessionUser {
   id: string
   email: string
+  role: 'admin' | 'user' | string
 }
 
 export interface Session {
@@ -172,4 +173,33 @@ export const auth = {
   },
 
   signOut: () => wrapped(request('/auth/logout', { method: 'POST' })),
+}
+
+
+export interface AdminMailSettings {
+  host: string
+  port: number
+  secure: boolean
+  user: string
+  from: string
+  configured: boolean
+  hasPassword: boolean
+  source: 'database' | 'environment'
+}
+
+export const admin = {
+  getMail: () => request<AdminMailSettings>('/admin/settings/mail'),
+  saveMail: (payload: {
+    host: string
+    port: number
+    secure: boolean
+    user: string
+    password?: string
+    from: string
+  }) => request<AdminMailSettings>('/admin/settings/mail', { method: 'PATCH', body: payload }),
+  testMail: (email?: string) =>
+    request<{ ok: boolean }>('/admin/settings/mail/test', {
+      method: 'POST',
+      body: email ? { email } : {},
+    }),
 }

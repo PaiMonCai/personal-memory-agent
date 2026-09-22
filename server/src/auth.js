@@ -30,7 +30,7 @@ function apiErr(status, code, message) {
 }
 
 async function userByEmail(email) {
-  const { rows } = await query('select id, email, password_hash, created_at from users where email = $1', [email])
+  const { rows } = await query('select id, email, password_hash, role, created_at from users where email = $1', [email])
   return rows[0] || null
 }
 
@@ -80,7 +80,7 @@ export async function requireUser(c, next) {
   const token = getCookie(c, SESSION_COOKIE)
   if (!token) throw apiErr(401, 'unauthenticated', '请先登录')
   const { rows } = await query(
-    `select u.id, u.email
+    `select u.id, u.email, u.role
      from sessions s join users u on u.id = s.user_id
      where s.token_hash = $1 and s.expires_at > now()`,
     [sha256(token)]
@@ -150,7 +150,7 @@ authRoutes.post('/password/login', async (c) => {
     throw apiErr(401, 'invalid_grant', '邮箱或密码不正确')
   }
   await startSession(c, user.id)
-  return c.json({ user: { id: user.id, email: user.email } })
+  return c.json({ user: { id: user.id, email: user.email, role: user.role } })
 })
 
 authRoutes.post('/otp/verify-login', async (c) => {
@@ -162,7 +162,7 @@ authRoutes.post('/otp/verify-login', async (c) => {
   if (!user) throw apiErr(400, 'otp_invalid', '验证码不正确或已过期')
   await tx((client) => consumeChallenge({ challengeId, email, code, purpose: 'login' }, client))
   await startSession(c, user.id)
-  return c.json({ user: { id: user.id, email: user.email } })
+  return c.json({ user: { id: user.id, email: user.email, role: user.role } })
 })
 
 authRoutes.post('/signup', async (c) => {
@@ -183,7 +183,7 @@ authRoutes.post('/signup', async (c) => {
     return rows[0]
   })
   await startSession(c, user.id)
-  return c.json({ user })
+  return c.json({ user: { id: user.id, email: user.email, role: user.role } })
 })
 
 authRoutes.post('/password/reset', async (c) => {
@@ -201,7 +201,7 @@ authRoutes.post('/password/reset', async (c) => {
     await client.query('delete from sessions where user_id = $1', [user.id])
   })
   await startSession(c, user.id)
-  return c.json({ user: { id: user.id, email: user.email } })
+  return c.json({ user: { id: user.id, email: user.email, role: user.role } })
 })
 
 authRoutes.post('/logout', async (c) => {

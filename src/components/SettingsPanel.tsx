@@ -226,6 +226,13 @@ export function SettingsPanel() {
   const modelsAbort = useRef<AbortController | null>(null)
   const onChange = actions.onSettingsChange
 
+  // 面板常驻 DOM；每次重新打开时从 store 同步一次，保留旧版“关闭后再开即取最新设置”的行为。
+  useEffect(() => {
+    if (state.panelOpen) setCur(normalizeSettings(state.settings))
+    // 只在开合边沿同步，编辑中的每次 state.settings 更新不能反向覆盖输入。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.panelOpen])
+
   /**
    * 模型目录是权威来源，拿不到就把**真实原因**摆出来并给重试按钮 ——
    * 静默降级成"暂无模型"会让人以为是服务端没有模型，而不是读取失败了。
@@ -248,10 +255,10 @@ export function SettingsPanel() {
 
   // 模型目录只在服务器模式下有意义，自定义模式不必发这个请求
   useEffect(() => {
-    if (cur.ai.mode === 'cloud') void reloadModels()
+    if (state.panelOpen && cur.ai.mode === 'cloud') void reloadModels()
     return () => modelsAbort.current?.abort()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cur.ai.mode])
+  }, [cur.ai.mode, state.panelOpen])
 
   // 动效代码编译失败 / 自动停用时，把原因显示在面板里
   useEffect(() => {
@@ -315,7 +322,7 @@ export function SettingsPanel() {
   const onCustom = cur.effect.type === 'custom'
 
   return (
-    <aside className="settings-panel" id="settings-panel" role="dialog" aria-modal="true" aria-label="个性设置">
+    <aside className={`settings-panel ${state.panelOpen ? '' : 'hidden'}`} id="settings-panel" role="dialog" aria-modal="true" aria-label="个性设置">
       <div className="set-head">
         <h2>个性设置</h2>
         <button type="button" className="btn btn-ghost btn-sm" data-set-act="close" onClick={actions.closeSettings}>

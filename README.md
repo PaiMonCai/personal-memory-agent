@@ -17,6 +17,7 @@
 | 待办整理 | 按逾期 / 今天 / 一周内分组，并可让模型给出优先级与取舍建议 |
 | 阶段复盘 | 按 7 天 / 30 天 / 全部区间生成总结、主题与后续行动建议 |
 | 个性设置 | 顶栏「设置」入口：8 套主题预设（含 3 套深色）、自定义强调色与背景渐变、背景图片、6 种动态特效、圆角与紧凑密度；设置存自建 PostgreSQL，换设备跟随账号 |
+| 管理员配置 | 首次部署可通过 bootstrap 管理员直接密码登录；管理员可在设置面板动态配置 SMTP、保存并发送测试邮件，无需重启容器 |
 | 悬浮三栏 | **左磁吸胶囊菜单 / 中内容区 / 右随手记卡片**。左右两栏脱离布局浮在内容之上，垂直居中；内容占满视口，只靠内边距避让。输入台是固定尺寸的矩形块，不撑满高度 |
 | 响应式 | 三档断点（900 / 1180 按内容定），触摸设备放大命中区域并去掉悬停态，适配刘海安全区与横屏矮屏 |
 | 交互细节 | 键盘 `/` 搜索、`n` 随手记、`Esc` 逐层关闭；抽屉与面板锁背景滚动 + 焦点陷阱；删除改为「撤销」而非确认框 |
@@ -46,7 +47,8 @@ src/styles/app.css       样式（含 .sidebar 侧栏、.bg-layer 背景层、ht
 tools/dom-test.mjs       jsdom 回归测试（Vite 打包后在 jsdom 执行）
 tools/contrast-check.py  WCAG 2.2 AA 对比度核验（浅色 / 深色各 14 与 11 组）
 tools/static-check.py    静态契约校验（显隐、布局、断点、CSS 变量、DOM 契约）
-server/src/              Hono 自建后端（认证 / PostgreSQL / SMTP / AI 网关）
+server/src/              Hono 自建后端（认证 / PostgreSQL / SMTP / AI 网关 / 管理员配置）
+server/src/admin.js       管理员 bootstrap、SMTP 管理接口与 setup 状态
 database/001_baseline.sql 自建 PostgreSQL 基线
 docker-compose.yml        PostgreSQL + Hono API + Nginx（前端多阶段构建）
 Dockerfile                API 镜像（node:22）
@@ -60,7 +62,8 @@ deploy/nginx.conf         静态站点与 /api 反向代理
 - **前端 Vite + React 18 + TypeScript**：`npm run build` 产出带内容哈希的 `dist/`（Nginx 直接托管）；`npm run dev` 本地开发，`/api` 由 Vite 代理到自建后端。不依赖任何托管平台 SDK，所有业务请求统一走同源 `/api`（可用 `VITE_API_BASE` 覆盖）。
 - **状态集中在 store**：视图组件只读 state、调 action；派生数据（筛选结果、待办分组、关联）由 store 统一计算，删除走「6 秒撤销窗口」再落库。
 - **数据自建**：PostgreSQL 16 只允许 Hono API 访问，不向公网暴露 5432；每条业务查询都带当前会话对应的 `owner_id`。
-- **登录**：自建邮箱密码 + 邮箱验证码体系；会话使用 HttpOnly Cookie，数据库只保存会话 token 的 SHA-256 哈希。SMTP、Cookie、验证码均由服务端控制。
+- **登录与管理员初始化**：自建邮箱密码 + 邮箱验证码体系；首次部署可通过 `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` 创建管理员，并直接使用密码登录，不依赖 SMTP。会话使用 HttpOnly Cookie，数据库只保存会话 token 的 SHA-256 哈希。
+- **SMTP 管理**：管理员可以在设置面板动态配置 SMTP、保存并发送测试邮件；密码加密存入 PostgreSQL，修改后立即生效，无需重启。
 - **默认大模型**：由 Hono 服务端代理 OpenAI 兼容接口，服务端持有 `AI_API_KEY`；浏览器不会拿到默认模型密钥。用户自定义供应商仍可单独配置。
 - **检索**：普通搜索与 Ask 都由 Hono 直接查询 PostgreSQL；Ask 结合全文、词项、FTS、长文本 chunk 与轻量时间权重做排序。`entry_chunks` 为后续 embedding 保留稳定分块层。
 - **显隐一律用 class，不用 `hidden` 属性**：浏览器 UA 样式里那条隐藏规则优先级低于作者样式表，任何 `display: flex` / `grid` 都会盖掉它 —— 结果是「属性设成 hidden 了，界面上照旧显示」。曾因此让拖拽提示层的蓝色罩层永久挂在输入区上。现在 CSS 顶部留了一条 `!important` 兜底，但新增的浮层仍应默认 `display: none`、由 `.show` 之类的类来切换。
@@ -262,7 +265,9 @@ GitHub Actions 会在推送与 PR 上自动执行类型检查、生产构建、D
 - `entry_links` — 条目之间的关联（source_id → target_id + 关联理由）
 - `entry_chunks` — 长文本稳定分块；当前用于索引基础，后续可挂语义 embedding
 - `reviews` — 阶段复盘（区间、总结、行动建议、统计）
-- `preferences` — 个性化设置（`theme` / `effect` 两个 JSONB；`owner_id` 唯一，一人一行，用 upsert 写入）
+- `preferences` — 个性化设置（`theme` / `effect` / `ai` JSONB；`owner_id` 唯一，一人一行，用 upsert 写入）
+- `system_settings` — 系统级设置；当前用于保存管理员配置的 SMTP，敏感密码加密落库
+- `users.role` — 用户角色，当前为 `user` / `admin`
 
 ## 自建部署
 
@@ -270,7 +275,45 @@ GitHub Actions 会在推送与 PR 上自动执行类型检查、生产构建、D
 
 ```bash
 cp .env.example .env
-# 修改 .env：数据库、SMTP、AI、加密密钥
+```
+
+### 首次部署必须关注的配置
+
+至少修改数据库、公开域名、AI，以及首次管理员：
+
+```env
+NODE_ENV=production
+APP_ORIGIN=https://memory.example.com
+
+POSTGRES_PASSWORD=replace-with-a-strong-database-password
+
+# 首次管理员：仅当数据库中不存在管理员时使用
+BOOTSTRAP_ADMIN_EMAIL=admin@example.com
+BOOTSTRAP_ADMIN_PASSWORD=replace-with-a-strong-admin-password
+
+# 加密后台保存的 SMTP 密码
+SYSTEM_CONFIG_ENCRYPTION_KEY=replace-with-a-long-random-encryption-secret
+
+# OTP 安全参数
+OTP_PEPPER=replace-with-a-long-random-secret
+
+# AI
+AI_BASE_URL=https://api.example.com/v1
+AI_API_KEY=replace-me
+AI_MODELS=gpt-5.6
+```
+
+随机密钥可以使用：
+
+```bash
+openssl rand -hex 32
+```
+
+> `SYSTEM_CONFIG_ENCRYPTION_KEY` 一旦用于保存 SMTP 密码后不要随意更换，否则数据库中的 SMTP 密码将无法解密。
+
+然后启动：
+
+```bash
 docker compose up -d
 ```
 
@@ -280,14 +323,134 @@ docker compose up -d
 - Hono API：仅 Docker 内网，由 Nginx 转发 `/api/*`
 - PostgreSQL：仅 Docker 内网，不映射公网端口
 
-生产环境应在 Nginx/Caddy/Cloudflare 前面补 HTTPS，并把 `.env` 中 `APP_ORIGIN` 改成实际 HTTPS 域名。
+### 首次管理员初始化
 
-本地开发 / 预览前端：
+生产环境**不需要先配置 SMTP 才能创建第一个管理员**。
+
+应用启动时会检查数据库中是否已经存在 `role=admin`：
+
+1. 已经有管理员：直接正常启动，不修改管理员账号和密码。
+2. 没有管理员，但配置了 `BOOTSTRAP_ADMIN_EMAIL` 和 `BOOTSTRAP_ADMIN_PASSWORD`：创建或提升该邮箱为管理员。
+3. 没有管理员，也没有 bootstrap 配置：应用仍可启动，但日志会提示补充管理员配置。
+
+首次管理员创建后，可以直接使用：
+
+```text
+管理员邮箱 + 密码
+```
+
+登录，不需要先收验证码。
+
+推荐首次启动流程：
+
+```text
+docker compose up -d
+  ↓
+管理员邮箱 + 密码登录
+  ↓
+打开「设置」
+  ↓
+管理员 · 邮件服务
+  ↓
+填写 SMTP
+  ↓
+保存 SMTP
+  ↓
+发送测试邮件
+  ↓
+确认成功
+```
+
+管理员创建成功后，可以从 `.env` 删除：
+
+```env
+BOOTSTRAP_ADMIN_EMAIL
+BOOTSTRAP_ADMIN_PASSWORD
+```
+
+即使忘记删除，只要数据库中已经存在管理员，后续启动也不会再次重置管理员密码。
+
+### SMTP 后台配置
+
+管理员可以在设置面板配置：
+
+- SMTP Host
+- SMTP Port
+- SSL/TLS
+- SMTP 用户名
+- SMTP 密码
+- 发件人
+
+后台保存后会**立即生效，无需重启 API 容器**。
+
+SMTP 配置保存在 `system_settings` 表。密码使用 AES-256-GCM 加密保存，不会通过读取接口返回明文。
+
+如果旧部署原本已经通过 `.env` 配置：
+
+```env
+SMTP_HOST=
+SMTP_PORT=
+SMTP_SECURE=
+SMTP_USER=
+SMTP_PASS=
+MAIL_FROM=
+```
+
+仍然可以继续工作。之后管理员从后台保存 SMTP 时，如果密码框留空，会保留当前有效密码。
+
+管理员接口：
+
+```http
+GET   /api/admin/settings/mail
+PATCH /api/admin/settings/mail
+POST  /api/admin/settings/mail/test
+```
+
+公开初始化状态：
+
+```http
+GET /api/setup/status
+```
+
+返回示例：
+
+```json
+{
+  "initialized": true,
+  "mailConfigured": true
+}
+```
+
+### 已有部署升级
+
+已有 PostgreSQL volume **不需要删除重建**。
+
+API 启动时会执行幂等 schema upgrade，自动补齐：
+
+- `users.role`
+- `users_role_idx`
+- `system_settings`
+
+原有用户、记录、复盘和偏好不会因为这次管理员升级而丢失。
+
+正式升级前仍建议备份 PostgreSQL。
+
+### HTTPS
+
+生产环境应在 Nginx / Caddy / Cloudflare 前面补 HTTPS，并把：
+
+```env
+APP_ORIGIN=https://memory.example.com
+```
+
+设置为真实公开域名。
+
+### 本地开发 / 预览前端
 
 ```bash
 npm install
-npm run dev        # Vite dev server，/api 代理到 http://127.0.0.1:3000（可用 API_ORIGIN 覆盖）
-# 或者：构建后用 Hono 之外的静态服务器预览
+npm run dev
+# 或：
 npm run build && npm run preview
 ```
 

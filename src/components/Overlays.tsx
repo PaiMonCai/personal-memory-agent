@@ -110,7 +110,7 @@ export function RichText({ html }: { html: string }) {
 export function Highlight({ text, keyword }: { text: unknown; keyword?: string }) {
   const kw = String(keyword || '').trim()
   if (!kw) return <>{String(text ?? '')}</>
-  const parts = highlightParts(text, keyword)
+  const parts = highlightParts(text, kw)
   return (
     <>
       {parts.map((p, i) => (p.hit ? <mark key={i}>{p.text}</mark> : <span key={i}>{p.text}</span>))}

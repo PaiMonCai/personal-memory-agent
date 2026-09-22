@@ -1,315 +1,55 @@
-# 信息管家 · 个人信息管家 Agent
-
-零散想法、资料与待办的统一收件箱。记录之后自动分类、生成摘要、提炼重点、发现关联，并支持关键词检索、智能问答、待办整理与阶段复盘。
-
-部署方式：自建 Docker（Nginx + Hono + PostgreSQL），默认访问 `http://localhost:8080/`。
-
-## 功能
-
-| 能力 | 说明 |
-|---|---|
-| 随手记录 | 一段文字即可，不需要先想好放哪个分类 |
-| 自动分类 | 归为「想法 / 资料 / 待办 / 随记」，并生成标题、摘要、标签、优先级 |
-| 重点提取 | 从原文里抽出关键信息与隐含的行动项 |
-| 自动关联 | 与已有记录比对，建立双向可见的关联并给出关联理由 |
-| 关键词检索 | 数据库端函数检索，标题 / 原文 / 摘要 / 标签 / 重点全覆盖 |
-| 智能问答 | 先检索相关个人记录，再只依据命中的记录回答；记录里没有的会直接说明没有 |
-| 待办整理 | 按逾期 / 今天 / 一周内分组，并可让模型给出优先级与取舍建议 |
-| 阶段复盘 | 按 7 天 / 30 天 / 全部区间生成总结、主题与后续行动建议 |
-| 个性设置 | 顶栏「设置」入口：8 套主题预设（含 3 套深色）、自定义强调色与背景渐变、背景图片、6 种动态特效、圆角与紧凑密度；设置存自建 PostgreSQL，换设备跟随账号 |
-| 管理员配置 | 首次部署可通过 bootstrap 管理员直接密码登录；管理员可在设置面板动态配置 SMTP、保存并发送测试邮件，无需重启容器 |
-| 悬浮三栏 | **左磁吸胶囊菜单 / 中内容区 / 右随手记卡片**。左右两栏脱离布局浮在内容之上，垂直居中；内容占满视口，只靠内边距避让。输入台是固定尺寸的矩形块，不撑满高度 |
-| 响应式 | 三档断点（900 / 1180 按内容定），触摸设备放大命中区域并去掉悬停态，适配刘海安全区与横屏矮屏 |
-| 交互细节 | 键盘 `/` 搜索、`n` 随手记、`Esc` 逐层关闭；抽屉与面板锁背景滚动 + 焦点陷阱；删除改为「撤销」而非确认框 |
-| md 导入 | **把文件直接拖进右栏**即可批量导入（主路径）；右栏标题旁另有一个不抢眼的小图标入口。支持 `.md` / `.markdown` / `.mdx` / `.txt`，单文件 ≤ 512KB，一次最多 10 个 |
-
-## 目录结构
-
-```
-index.html               Vite 入口页面（#root 挂载点）
-src/main.tsx             应用入口（挂载 React、引入样式）
-src/App.tsx              应用外壳：背景层、启动遮罩、登录页 / 主界面、四视图、抽屉、全局快捷键
-src/state/store.tsx      全局状态与全部交互动作（useReducer + Context，替代旧 app.js 的 state）
-src/components/          Sidebar / Topbar / ComposeRail / EntryDrawer / SettingsPanel / Overlays / AuthView
-src/components/views/    InboxView / TodoView / AskView / ReviewView
-src/lib/api.ts           自建 REST 客户端与认证（request / auth，只访问同源 /api）
-src/lib/data.ts          数据层：条目 / 关联 / 复盘 / 偏好 / 模型目录 / SSE 流转发 / 错误描述
-src/lib/ai.ts            大模型调用：分析 / 问答 / 复盘 / 待办整理（含自定义供应商直连）
-src/lib/settings.ts      主题预设、设置规范化、供应商清单迁移、按路径读写
-src/lib/effects.ts       动态特效引擎（单 canvas，6 种内置 + 自定义 JS）
-src/lib/ui.ts            转义、时间格式化、轻量 Markdown、关键词高亮
-src/lib/filter-ink.ts    筛选栏滑动指示器
-src/lib/memory.ts        长文本分块与 md 导入辅助
-src/lib/overlays.ts      toast / 确认框（事件总线 + React 宿主）
-src/lib/storage.ts       localStorage 读写（设置缓存、悬浮栏位置）
-src/hooks/               悬浮面板拖动 / 浮层同步 / 媒体查询
-src/styles/app.css       样式（含 .sidebar 侧栏、.bg-layer 背景层、html[data-mode="dark"] 深色主题）
-tools/dom-test.mjs       jsdom 回归测试（Vite 打包后在 jsdom 执行）
-tools/contrast-check.py  WCAG 2.2 AA 对比度核验（浅色 / 深色各 14 与 11 组）
-tools/static-check.py    静态契约校验（显隐、布局、断点、CSS 变量、DOM 契约）
-server/src/              Hono 自建后端（认证 / PostgreSQL / SMTP / AI 网关 / 管理员配置）
-server/src/admin.js       管理员 bootstrap、SMTP 管理接口与 setup 状态
-database/001_baseline.sql 自建 PostgreSQL 基线
-docker-compose.yml        PostgreSQL + Hono API + Nginx（前端多阶段构建）
-Dockerfile                API 镜像（node:22）
-Dockerfile.web           前端镜像（node:22 构建 dist → nginx 静态托管）
-deploy/nginx.conf         静态站点与 /api 反向代理
-.github/workflows/quality.yml GitHub Actions：类型检查 / 构建 / DOM / 静态契约 / SQL / API smoke test
-```
-
-## 技术要点
-
-- **前端 Vite + React 18 + TypeScript**：`npm run build` 产出带内容哈希的 `dist/`（Nginx 直接托管）；`npm run dev` 本地开发，`/api` 由 Vite 代理到自建后端。不依赖任何托管平台 SDK，所有业务请求统一走同源 `/api`（可用 `VITE_API_BASE` 覆盖）。
-- **状态集中在 store**：视图组件只读 state、调 action；派生数据（筛选结果、待办分组、关联）由 store 统一计算，删除走「6 秒撤销窗口」再落库。
-- **数据自建**：PostgreSQL 16 只允许 Hono API 访问，不向公网暴露 5432；每条业务查询都带当前会话对应的 `owner_id`。
-- **登录与管理员初始化**：自建邮箱密码 + 邮箱验证码体系；首次部署可通过 `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` 创建管理员，并直接使用密码登录，不依赖 SMTP。会话使用 HttpOnly Cookie，数据库只保存会话 token 的 SHA-256 哈希。
-- **SMTP 管理**：管理员可以在设置面板动态配置 SMTP、保存并发送测试邮件；密码加密存入 PostgreSQL，修改后立即生效，无需重启。
-- **默认大模型**：由 Hono 服务端代理 OpenAI 兼容接口，服务端持有 `AI_API_KEY`；浏览器不会拿到默认模型密钥。用户自定义供应商仍可单独配置。
-- **检索**：普通搜索与 Ask 都由 Hono 直接查询 PostgreSQL；Ask 结合全文、词项、FTS、长文本 chunk 与轻量时间权重做排序。`entry_chunks` 为后续 embedding 保留稳定分块层。
-- **显隐一律用 class，不用 `hidden` 属性**：浏览器 UA 样式里那条隐藏规则优先级低于作者样式表，任何 `display: flex` / `grid` 都会盖掉它 —— 结果是「属性设成 hidden 了，界面上照旧显示」。曾因此让拖拽提示层的蓝色罩层永久挂在输入区上。现在 CSS 顶部留了一条 `!important` 兜底，但新增的浮层仍应默认 `display: none`、由 `.show` 之类的类来切换。
-
-## 设计语言：案头档案
-
-界面按「一张安静的书桌」来做，但两侧的工具是**浮在桌面上**的：**左边是吸在边缘的胶囊目录，中间是正在整理的档案，右边是一张便签纸卡片**。
-判断标准只有一条：**用排版和细线建立秩序，而不是用色块和阴影**。落到具体：
-
-- **列表是行，不是卡片**。一条记录 = 一行 + 一根发丝分隔线，左侧一根 2px 的类型指示条（想法／资料／待办／随记各一色）；悬停时指示条上下舒展、整行淡淡浮起。同样面积能多读两三倍条目，也少了"卡片套卡片"的喧闹。
-- **导航是目录，不是按钮**。选中态靠左侧指示线与字重变化表达，没有底色块。
-- **筛选是栏目**。去掉胶囊底色，用下划线 + 字重表达选中，像杂志的栏目切换。
-- **每页有标题层级**。`h1` + 一句说明 + 一根分隔线，然后才进正文。
-- **两侧是悬浮层，不是栏位**。左胶囊与右卡片都 `position: fixed` + 垂直居中，脱离文档流；内容区靠内边距避让。指针移入时轻轻向内容侧让 3px —— 磁吸的手感。窄屏（< 860px）才恢复成全高抽屉。
-- **顶栏也不是"栏"**。它没有通栏背景与分隔线，只作为搜索胶囊的停靠位；搜索本身是一颗 440px 宽的悬浮胶囊、**水平居中**，与左右两栏同一套语言。
-- **账号区在右下角**。设置／退出收进一颗右下角的悬浮胶囊，不再占左侧菜单的位置；窄屏时移到底部居中，避开两侧抽屉。
-- **输入是"纸"**。随手记是固定 282px 高的矩形块（不撑满右栏），浅底、无描边，聚焦时才浮出一圈品牌色。
-- **导入靠拖拽，不靠按钮**。把 `.md` 拖进右栏即导入，平时完全不可见；标题旁只留一个低对比度的小图标兜底。全局拦截 `dragover` / `drop`，避免拖错位置时浏览器直接打开文件。
-- **徽章收小去描边**，不与标题争视觉重量；所有数字用等宽字形（`tabular-nums`）避免跳动。
-- **强调色渐变收敛**：第二端色相只偏移 14°、明度只抬 4.5% —— 偏移一大就变成俗气的「紫蓝渐变」。
-- **登录页**品牌面板叠一层 30px 细网格 + 收在左上角的高光，避开「平铺渐变的塑料感」。
-- **统计面板**用 1px 间隙露出底色充当分隔线（发丝分隔），而不是给每个数字加一圈边框。
-
-## 响应式与交互
-
-**断点按内容定，不追设备尺寸**：左右悬浮栏宽度 + 间距由 `--nav-w` / `--rail-w` / `--float-gap` 三个变量控制，断点只改这三个值，内容区自动避让。
-
-| 区间 | 布局 |
-|---|---|
-| ≥ 1280px | 悬浮胶囊 176px / 内容自适应 / 随手记卡片 300px |
-| 1080 – 1280px | 两侧收窄（164 / 280） |
-| 940 – 1080px | 进一步收窄（156 / 252），输入框高度同步降 |
-| < 940px | 收到最窄（148 / 236） |
-| < 860px | 折成单栏。两栏恢复为从本侧滑出的**全高抽屉**（悬浮形态只用于宽屏），互斥打开；顶栏出现汉堡与「＋」 |
-| < 520px | 压缩内边距与字号，统计网格转两列 |
-| 横屏且高 < 540px | 压缩垂直留白，避免内容被顶出屏幕 |
-
-**CSS 与 JS 必须用同一个断点值**（`max-width: 860px`），改动时要同步 —— 否则抽屉状态会错乱。
-
-**看输入方式，不只看屏幕尺寸**：`@media (hover: none)` 摘掉会"粘住"的悬停态改用按下反馈；`@media (pointer: coarse)` 把命中区域放大到 ≥44px；`touch-action: manipulation` 去掉 300ms 点击延迟。窄屏输入框字号提到 16px，避免 iOS Safari 聚焦时放大整页。
-
-**无障碍**：跳转链接、`:focus-visible` 焦点环（鼠标点不出现、键盘 Tab 一定有）、浮层用 `inert` 做焦点陷阱并在关闭后归还焦点、`aria-live` 播报提示、`role="alert"` 播报登录错误、装饰性 emoji 加 `aria-hidden`、`aria-busy` 标注加载中。
-
-**键盘**：`/` 聚焦搜索，`n` 聚焦随手记，`Esc` 按「确认框 → 导航抽屉 → 设置面板 → 详情抽屉」逐层关闭。
-
-**筛选栏的下划线是一条滑动的线，不是一个一个展开的**。收件箱的分类与状态、复盘的区间都用同一个指示器：切换时线从旧栏目滑向新栏目，而不是"旧的消失、新的出现"两段割裂动画 —— 后者就是僵硬感的来源。因为筛选行是整块重写的，实现上要先记住上一次的几何，渲染后把新指示器放回旧位置、强制重排、再过渡到目标位置（FLIP）。切换视图时会丢掉旧几何，免得线从上一个页面长途滑过来；窗口尺寸变化会让 chip 换行，此时直接贴合、不做过渡。
-
-**点击筛选要立刻有反应**。点击后先把选中态和指示器挪到位（同步、零等待），再发起服务器读取；等数据回来整块重渲染时，指示器已经在正确位置上了。若反过来先 `await` 再渲染，用户感知到的就是「点了半天线才开始滑」。
-
-**两侧悬浮方块可以上下拖动**。左目录胶囊和右随手记卡片顶上各有一条手柄，按住拖到想要的高度，松手会吸附到最近的一档（贴顶 / 垂直居中 / 贴底）；键盘用户聚焦手柄后可用 `↑` `↓` 微调（按住 `Shift` 大步）、`Home` 回正中。位置存在 localStorage，刷新后还在。
-
-> 几何上有个坑：两栏是 `top:50%` + `translateY(-50%)` 定位的，所以写进 `style.top` 的值是**方块的视觉中心点**，不是顶边。按顶边算会让「贴顶」把上半截顶出视口、「贴底」在下方多空出半个方块 —— 两种错法方向相反。`clampTop` / `floatSlots` / 拖动起点三处必须用同一套中心点语义，起点取 `rect.top` 还会在按下的瞬间跳半个方块。
-
-**内容区在两个悬浮栏之间居中，不是和它们各让各的**。左栏 176px、右栏 300px，若分别让位，内容会相对整个窗口偏左（看起来就像没居中）。所以两侧 padding 取同一个值 `max(--nav-w, --rail-w)`，代价是较窄那侧多留些背景，换来真正的对称。
-
-**键盘可以上下切视图、左右切栏目**。`↑` `↓` 在收件箱 / 待办 / 问答 / 复盘之间循环，`←` `→` 切当前视图的筛选栏目（收件箱切分类、复盘切区间，待办和问答没有筛选栏就不响应）。到头会绕回另一端。
-
-> 实现上键盘走**程序化点击**（对目标按钮调 `.click()`），不另写一套切换逻辑 —— 否则鼠标和键盘会走两条路径，指示器的滑动和列表淡入迟早分叉。顺序也直接从 DOM 读（`querySelectorAll('#tabs [data-view]')`），不另维护一份常量，改导航顺序时键盘自动跟随。
-
-> 让路的场合：焦点在输入控件或拖动手柄上、模态框 / 设置面板 / 抽屉打开、未登录。只在**真的接管了**才 `preventDefault()` —— 待办页按左右键仍留给页面自己处理。代价是上下键不再滚动页面，滚动请用滚轮或 `PageUp` / `PageDown`。
-
-> 切换结果会播报到一个视觉隐藏的 `aria-live` 区（不用 `display:none` —— 那样读屏也读不到），播报前会把栏目名里的 emoji 去掉，否则读屏会念出「灯泡 想法」。
-
-**焦点环只出现在真正的控件上**。`main` 带 `tabindex="-1"`，是给「跳到主要内容」当落点的；但点击内容区空白时浏览器会把焦点交给最近的 focusable 祖先 —— 也就是它，之后一按键盘 `:focus-visible` 就生效，一圈 2px 环几乎框住整个页面。所以 `[tabindex='-1']` 的落点统一不画环：焦点落在它身上只是为了把读屏引到新内容，用户并没有「走进」某个控件。按钮、链接、输入的焦点环照旧保留。
-
-**动效**：状态变化用指数缓出；视图入场过渡只在真正切换视图时播、数据刷新不重放；完全尊重系统 `prefers-reduced-motion`（那条通配规则会把所有动画压到 0.01ms，新增动画无需单独适配）。
-
-**背景特效的选择要看得到**：设置面板里每张特效卡都带一条 28px 的预览窗，用纯 CSS 动画演示该特效的样子（星空闪烁 / 飞絮下落 / 气泡上浮 / 极光流动 / 星轨放射 / 自定义），颜色取 `var(--brand)` 随主题变化。选「无」时密度与速度失去作用对象，两行滑杆禁用并淡化 —— 避免"拖了没反应"。
-
-## AI 模型设置
-
-设置面板的「AI 模型」一节，两种来源二选一：
-
-**服务器模型**（默认）。模型目录由自建 Hono 服务提供，默认 AI Key 只存在服务端环境变量里。
-列表里可以直接选，也可以手填一个目录里没列出的 ID —— 目录未必列全，但后端可能认得。
-读取失败时会把**真实原因**摆出来并给「重试」，而不是静默显示「暂无模型」。
-
-**自定义接口**：维护一份**按供应商分组**的模型清单，请求直连你自己的服务（OpenAI 兼容格式）。
-
-- 一家供应商 = 一个接口地址 + 一个 API Key + 它下面的若干模型。
-  同一个 Key 不用为每个模型各填一遍，这正是分组的意义。
-- 可随时增删供应商、增删某家下面的模型；每家上限 30 个模型，清单上限 20 家。
-- 模型名输入框里回车即可添加，新加的那个自动成为选中项。
-- 当前用的是哪家的哪个模型，存在 `custom.pick` 里，形如 `vendorId::modelId`。
-  删掉正在用的模型不会让链路哑掉 —— 会自动退回这家剩下的第一个可用模型。
-- 地址要能拼成 `<base>/chat/completions`，尾斜杠会自动去掉；非 http(s) 会被拒。
-  同一家下面重名的模型会被丢掉。
-- 面板会实时告诉你还缺什么，且**点名是哪家**（地址 → 模型 → 密钥，顺序与字段顺序一致）；
-  只说「都还不能用」的话，多家并存时根本不知道该改哪家。
-
-> 自定义供应商仍由浏览器 `fetch` 其 OpenAI 兼容接口并手解 SSE；默认模型则统一走 `/api/ai/chat`。
-> 同时兼容两种返回：真正的流式（`text/event-stream`）和一次性 JSON —— 有些网关不转发流。
-> 分片被任意切断也能拼回来（按 `\n` 缓冲，跨 chunk 的 JSON 不算完）。
-> 失败时说清楚是哪种：401 带服务端原因，连不上则提示可能是跨域 —— 浏览器直连要求对方
-> 允许 CORS，被拦时请填自己的中转地址。
-
-**生成参数**：温度（0~2）与最大长度（0~8192，0 = 交给服务端默认），两种来源共用。
-注意温度会**覆盖服务器模型的默认值** —— 整理笔记建议 0.3~0.7。
-
-**存哪儿**：`preferences.ai` 列（jsonb），随账号同步到自建 PostgreSQL；其中自定义供应商 API Key 在服务端用 AES-256-GCM 加密后落库。
-但**本地缓存里刻意剔掉了每家的 API Key** —— 那份缓存只是为了登录页不闪默认配色，没必要把密钥再往浏览器里存一份。
-
-早期版本只能填一个「地址 + 密钥 + 模型名」。那份配置不会丢：读取时由
-`migrateCustom()` 迁成"一家供应商 + 它下面的那个模型"，并继续保持选中。
-
-**执行层的接口**：`ai.js` 不自己去读设置，由 `app.js` 在设置变化时推入
-（`useAiSettings`）。这样 AI 层只依赖「一个普通的配置对象」，测试里塞假配置就能跑，
-也不会和设置模块形成循环引用。
-
-## 自定义 JS 动效
-
-「动态特效 → 自定义」可以自己写代码画背景。代码是一个**函数体**，每帧执行一次，参数为 `fx`：
-
-| 可用 | 说明 |
-|---|---|
-| `fx.ctx` | 画布 2D 上下文（每帧已清屏，直接画即可） |
-| `fx.w` / `fx.h` | 画布宽高（CSS 像素） |
-| `fx.t` / `fx.dt` | 累计秒数 / 距上一帧的增量（已按 60fps 归一，上限 3） |
-| `fx.speed` / `fx.intensity` | 设置里的「速度」与「密度」滑杆 |
-| `fx.rgba(a)` | 取主题强调色并带透明度，如 `fx.rgba(0.4)` |
-| `fx.rand(a, b)` | 区间随机数 |
-| `fx.state` | 跨帧保存状态的对象（粒子池之类放这里） |
-
-面板里有「填入示例」按钮，点开会给出一段可直接运行的最小代码。
-
-**执行边界**：用 `new Function('fx', code)` 编译 —— 代码只能拿到 `fx` 一个参数，摸不到模块内的闭包变量，但它**仍以本页身份运行**，能访问 `document` / `fetch` / `localStorage`。所以只应粘贴自己写的或完全信任的代码。
-
-**失控保护**（防止写错的代码拖垮页面）：
-
-- 代码上限 8000 字符
-- 语法错误在编译时捕获，不向外抛，面板里显示原因
-- 运行时连续出错 3 次 → 自动停用并广播 `fx-custom-failed`
-- 单帧耗时持续超过 60ms（死循环或画得太重）累计 5 次 → 自动停用
-
-代码存在 `preferences.effect.custom.code`，随其余设置一起上云，换设备同步。
-
-**z-index** 全部走语义化变量（`--z-sticky` / `--z-drawer` / `--z-toast` …），不再出现裸数字。
-
-## 质量校验
-
-```bash
-# 安装依赖（首次）
-npm install
-
-# TypeScript 严格模式类型检查
-npm run check
-
-# 生产构建（Vite → dist/）
-npm run build
-
-# DOM 回归测试（Vite 打包后在 jsdom 执行；用假 /api 替换自建服务，不发真实请求）
-node tools/dom-test.mjs
-
-# WCAG 2.2 AA 对比度核验（改了配色就跑一次）
-python tools/contrast-check.py
-
-# 静态契约校验（不跑浏览器，只做文本断言：显隐、布局、断点、CSS 变量、DOM 契约）
-python tools/static-check.py
-```
-
-`tools/dom-test.mjs` 覆盖启动、视图切换、三栏抽屉与互斥、滚动锁、撤销删除、键盘快捷键、`Esc` 分层关闭、拖拽导入、设置面板特效联动、自定义 JS 动效、筛选栏滑动指示器等 205 项断言。测试入口是 `tools/test-entry.tsx`：由 esbuild 打成单个 IIFE 后在 jsdom 里执行，并以 legacy 模式挂载 React —— 用例里「点击后立即断言 DOM」的写法依赖旧实现那样的同步渲染。
-
-镜像发布会话：推送到 `main` 会触发 `.github/workflows/docker-publish.yml`，自动构建并推送两个镜像到 GitHub Container Registry：
-
-- `ghcr.io/<owner>/<repo>-api` —— 自建后端（Hono）
-- `ghcr.io/<owner>/<repo>-web` —— 前端静态资源（Nginx）
-
-标签为 `latest` 与当次 commit 的 SHA，推送用内置 `GITHUB_TOKEN`，无需额外配置 Secrets。拉取后分别替代 `docker-compose.yml` 里 `api` / `web` 两个服务的 `build` 段即可（把 `image:` 指向上面的地址并删掉 `build`）。镜像默认私有，可在仓库的 Packages 页面改可见性。
-
-`tools/static-check.py` 是**另一层必要的校验**：DOM 测试断言的是属性与 class，而真正决定用户看到什么的是 CSS，两者脱节就会漏 bug。所以显隐、布局这类契约要在 CSS 文本层面再断言一次（详见下节）。
-
-GitHub Actions 会在推送与 PR 上自动执行类型检查、生产构建、DOM 回归、静态契约、WCAG 对比度，并在临时 PostgreSQL 16 中实际加载 `database/001_baseline.sql`。
-
-## 配色与对比度
-
-中性色与语义色全部走 CSS 变量，浅色默认值在 `:root`，深色在 `html[data-mode='dark']`。
-下表为**当前值**，全部满足 WCAG 2.2 AA（正文 ≥ 4.5:1，UI 组件边界 ≥ 3:1）：
-
-| 变量 | 浅色 | 深色 | 用途 | 实测对比度 |
-|---|---|---|---|---|
-| `--text` | `#171a24` | `#e8eaf2` | 正文 | 17.4:1 / 14.1:1 |
-| `--text-2` | `#5b6172` | `#a8afc4` | 次要文字 | 6.2:1 / 7.8:1 |
-| `--text-3` | `#6b7184` | `#7c839a` | 辅助文字（时间、提示） | 4.5:1 / 4.5:1 |
-| `--line-strong` | `#8992be` | `#5f6a8d` | 控件边框 | 3.0:1 / 3.2:1 |
-| `--todo` | `#cd4d0b` | `#ffab72` | 待办 | 4.5:1 / 9.2:1 |
-| `--note` | `#05875f` | `#63e2b4` | 随记 | 4.5:1 / 10.6:1 |
-| `--idea` | `#7c3aed` | `#bda6ff` | 想法 | 5.7:1 / 8.1:1 |
-| `--material` | `#2563eb` | `#86b4ff` | 资料 | 5.2:1 / 8.1:1 |
-| `--danger` | `#dc2626` | `#f87171` | 危险 / 逾期 | 4.8:1 / 6.1:1 |
-
-调色时的做法：**保持色相与饱和度不变、只降低明度**，取"刚好达标"的值，把视觉偏移压到最小。
-`tools/contrast-check.py` 会自动跑这套核对 —— 改动配色后务必复跑。
-
-另外，状态一律**不只靠颜色**表达：已完成用删除线、逾期除了红色还有文字提示、AI 分析中有文案标签。
-
-## 数据模型
-
-- `entries` — 原始文本 + AI 产出的标题 / 分类 / 摘要 / 重点 / 行动项 / 标签 / 优先级 / 截止日 / AI 状态
-- `entry_links` — 条目之间的关联（source_id → target_id + 关联理由）
-- `entry_chunks` — 长文本稳定分块；当前用于索引基础，后续可挂语义 embedding
-- `reviews` — 阶段复盘（区间、总结、行动建议、统计）
-- `preferences` — 个性化设置（`theme` / `effect` / `ai` JSONB；`owner_id` 唯一，一人一行，用 upsert 写入）
-- `system_settings` — 系统级设置；当前用于保存管理员配置的 SMTP，敏感密码加密落库
-- `users.role` — 用户角色，当前为 `user` / `admin`
-
-## 自建部署
-
-最简单的方式是 Docker Compose：
+# 信息管家
+
+自托管的个人信息与记忆管理 Agent。
+
+把零散想法、资料和待办统一记录下来，由 AI 自动分类、摘要、提炼重点并建立关联，同时支持检索、问答、待办整理和阶段复盘。
+
+## 主要功能
+
+- 随手记录想法、资料与待办
+- AI 自动分类、摘要、标签与重点提取
+- 自动发现记录之间的关联
+- 关键词检索与智能问答
+- 待办整理与阶段复盘
+- Markdown / 文本文件导入
+- 主题、背景和界面个性化
+- 服务器模型与自定义 OpenAI-compatible 接口
+- 邮箱密码 + OTP 登录
+- 管理员后台配置 SMTP
+- Docker 自托管部署
+
+## 技术栈
+
+- 前端：Vite + React + TypeScript
+- 后端：Hono
+- 数据库：PostgreSQL
+- Web：Nginx
+- 部署：Docker Compose
+
+## 快速部署
 
 ```bash
 cp .env.example .env
 ```
 
-### 首次部署必须关注的配置
-
-至少修改数据库、公开域名、AI，以及首次管理员：
+至少配置：
 
 ```env
-NODE_ENV=production
 APP_ORIGIN=https://memory.example.com
 
 POSTGRES_PASSWORD=replace-with-a-strong-database-password
 
-# 首次管理员：仅当数据库中不存在管理员时使用
 BOOTSTRAP_ADMIN_EMAIL=admin@example.com
 BOOTSTRAP_ADMIN_PASSWORD=replace-with-a-strong-admin-password
+SYSTEM_CONFIG_ENCRYPTION_KEY=replace-with-a-long-random-secret
 
-# 加密后台保存的 SMTP 密码
-SYSTEM_CONFIG_ENCRYPTION_KEY=replace-with-a-long-random-encryption-secret
-
-# OTP 安全参数
 OTP_PEPPER=replace-with-a-long-random-secret
+PREFERENCES_ENCRYPTION_KEY=replace-with-32-byte-key
 
-# AI
 AI_BASE_URL=https://api.example.com/v1
 AI_API_KEY=replace-me
 AI_MODELS=gpt-5.6
 ```
-
-随机密钥可以使用：
-
-```bash
-openssl rand -hex 32
-```
-
-> `SYSTEM_CONFIG_ENCRYPTION_KEY` 一旦用于保存 SMTP 密码后不要随意更换，否则数据库中的 SMTP 密码将无法解密。
 
 然后启动：
 
@@ -317,49 +57,34 @@ openssl rand -hex 32
 docker compose up -d
 ```
 
-默认：
-
-- Nginx：`http://127.0.0.1:8080`
-- Hono API：仅 Docker 内网，由 Nginx 转发 `/api/*`
-- PostgreSQL：仅 Docker 内网，不映射公网端口
-
-### 首次管理员初始化
-
-生产环境**不需要先配置 SMTP 才能创建第一个管理员**。
-
-应用启动时会检查数据库中是否已经存在 `role=admin`：
-
-1. 已经有管理员：直接正常启动，不修改管理员账号和密码。
-2. 没有管理员，但配置了 `BOOTSTRAP_ADMIN_EMAIL` 和 `BOOTSTRAP_ADMIN_PASSWORD`：创建或提升该邮箱为管理员。
-3. 没有管理员，也没有 bootstrap 配置：应用仍可启动，但日志会提示补充管理员配置。
-
-首次管理员创建后，可以直接使用：
+默认访问：
 
 ```text
-管理员邮箱 + 密码
+http://服务器IP:8080
 ```
 
-登录，不需要先收验证码。
+## 首次管理员与 SMTP
 
-推荐首次启动流程：
+首次部署不需要提前把 SMTP 配好。
+
+应用发现数据库中没有管理员时，会使用：
+
+```env
+BOOTSTRAP_ADMIN_EMAIL
+BOOTSTRAP_ADMIN_PASSWORD
+```
+
+创建管理员。
+
+之后使用管理员邮箱和密码直接登录，在：
 
 ```text
-docker compose up -d
-  ↓
-管理员邮箱 + 密码登录
-  ↓
-打开「设置」
-  ↓
-管理员 · 邮件服务
-  ↓
-填写 SMTP
-  ↓
-保存 SMTP
-  ↓
-发送测试邮件
-  ↓
-确认成功
+设置 → 管理员 · 邮件服务
 ```
+
+中填写 SMTP，并发送测试邮件。
+
+SMTP 保存后立即生效，不需要重启服务。
 
 管理员创建成功后，可以从 `.env` 删除：
 
@@ -368,105 +93,47 @@ BOOTSTRAP_ADMIN_EMAIL
 BOOTSTRAP_ADMIN_PASSWORD
 ```
 
-即使忘记删除，只要数据库中已经存在管理员，后续启动也不会再次重置管理员密码。
+`SYSTEM_CONFIG_ENCRYPTION_KEY` 用于加密 SMTP 密码，投入使用后不要随意更换。
 
-### SMTP 后台配置
+## AI 模型
 
-管理员可以在设置面板配置：
-
-- SMTP Host
-- SMTP Port
-- SSL/TLS
-- SMTP 用户名
-- SMTP 密码
-- 发件人
-
-后台保存后会**立即生效，无需重启 API 容器**。
-
-SMTP 配置保存在 `system_settings` 表。密码使用 AES-256-GCM 加密保存，不会通过读取接口返回明文。
-
-如果旧部署原本已经通过 `.env` 配置：
+默认模型通过服务端的 OpenAI-compatible 接口调用：
 
 ```env
-SMTP_HOST=
-SMTP_PORT=
-SMTP_SECURE=
-SMTP_USER=
-SMTP_PASS=
-MAIL_FROM=
+AI_BASE_URL=https://api.example.com/v1
+AI_API_KEY=replace-me
+AI_MODELS=model-a,model-b
 ```
 
-仍然可以继续工作。之后管理员从后台保存 SMTP 时，如果密码框留空，会保留当前有效密码。
+用户也可以在设置中添加自己的 OpenAI-compatible 接口与模型。
 
-管理员接口：
+## 已有部署升级
 
-```http
-GET   /api/admin/settings/mail
-PATCH /api/admin/settings/mail
-POST  /api/admin/settings/mail/test
-```
+已有 PostgreSQL volume 不需要删除。
 
-公开初始化状态：
+应用启动时会自动补齐管理员角色和系统设置相关数据库结构，原有记录与用户数据会保留。
 
-```http
-GET /api/setup/status
-```
+升级前建议备份数据库。
 
-返回示例：
+## HTTPS
 
-```json
-{
-  "initialized": true,
-  "mailConfigured": true
-}
-```
-
-### 已有部署升级
-
-已有 PostgreSQL volume **不需要删除重建**。
-
-API 启动时会执行幂等 schema upgrade，自动补齐：
-
-- `users.role`
-- `users_role_idx`
-- `system_settings`
-
-原有用户、记录、复盘和偏好不会因为这次管理员升级而丢失。
-
-正式升级前仍建议备份 PostgreSQL。
-
-### HTTPS
-
-生产环境应在 Nginx / Caddy / Cloudflare 前面补 HTTPS，并把：
+生产环境建议设置：
 
 ```env
 APP_ORIGIN=https://memory.example.com
 ```
 
-设置为真实公开域名。
+并在服务前使用 Nginx、Caddy、OpenResty 或 Cloudflare 提供 HTTPS。
 
-### 本地开发 / 预览前端
+## 本地开发
 
 ```bash
 npm install
 npm run dev
-# 或：
-npm run build && npm run preview
 ```
 
-没有 `/api` 时只能查看静态界面，无法登录或读写数据。
+生产构建：
 
-## 维护须知：缓存与内容哈希
-
-浏览器、Nginx 或前置 CDN 都可能缓存静态资源。重新发布后如果 HTML 与 JS 命中不同版本，
-会出现"新 HTML + 旧 JS"的混合状态。
-
-迁移到 Vite 后这件事由构建流程接管：`npm run build` 会给 `dist/assets/*` 里的 JS / CSS
-文件名带上内容哈希（如 `app-a1b2c3d4.js`），`index.html` 自动引用当次构建的哈希名。
-内容没变哈希就不变（缓存命中），内容变了哈希必变（缓存自然失效），不需要再手工维护版本号。
-
-需要留意的只有两点：
-
-- 自定义背景图等**运行时**资源仍可能被缓存，必要时在图片 URL 后自带查询参数；
-- `index.html` 本身不携带哈希，Nginx 已按 `try_files` 回退到它；若前置 CDN 缓存了 HTML，
-  发布后刷新一次 CDN 缓存即可。
+```bash
+npm run build
+```

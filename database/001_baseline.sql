@@ -10,7 +10,16 @@ create table if not exists users (
   id uuid primary key default gen_random_uuid(),
   email citext not null unique,
   password_hash text not null,
+  role text not null default 'user' check (role in ('user','admin')),
   created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists users_role_idx on users(role);
+
+create table if not exists system_settings (
+  key text primary key,
+  value jsonb not null default '{}'::jsonb,
   updated_at timestamptz not null default now()
 );
 

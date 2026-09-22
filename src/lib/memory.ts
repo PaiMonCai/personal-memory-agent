@@ -39,7 +39,7 @@ export function isMarkdown(file: { name: string; type?: string }): boolean {
 }
 
 /** 拖拽事件里是否夹带文件 */
-export function hasFiles(e: { dataTransfer?: { types?: unknown } }): boolean {
+export function hasFiles(e: { dataTransfer?: { types?: unknown } | null }): boolean {
   const dt = e.dataTransfer
   return !!dt && Array.from((dt.types || []) as unknown[]).includes('Files')
 }

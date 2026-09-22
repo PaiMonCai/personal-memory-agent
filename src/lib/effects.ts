@@ -327,7 +327,7 @@ function drawOrbit(dt: number) {
   }
 }
 
-function drawAurora(dt: number) {
+function drawAurora(_dt: number) {
   const sp = cfg.speed
   const time = performance.now() / 1000
   const bands = 3
@@ -425,7 +425,7 @@ export function setEffect(next: { type?: string; intensity?: number; speed?: num
     speed: Number(next?.speed) || 1,
   }
   if (cfg.type === 'custom') {
-    const r = compileCustom(next?.custom?.code)
+    const r = compileCustom(next?.custom?.code ?? '')
     // 编译失败就广播，让设置面板能立刻显示原因
     if (!r.ok) document.dispatchEvent(new CustomEvent('fx-custom-failed', { detail: { reason: r.error } }))
   } else {

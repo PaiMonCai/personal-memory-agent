@@ -146,9 +146,12 @@ function Shell() {
         if (t && (t as HTMLElement).closest?.('[data-grip]')) return
         if (document.querySelector('.modal-mask')) return
         if (state.phase !== 'app') return // 还没登录，别在看不见的地方改视图
-        if (state.panelOpen) return // 面板里的滑杆要用左右键调值
+        const panel = document.getElementById('settings-panel')
+        if (state.panelOpen || (panel && !panel.classList.contains('hidden'))) return // 面板里的滑杆要用左右键调值
         if (state.navOpen) return
+        if (document.body.classList.contains('nav-open')) return
         if (state.railOpen) return
+        if (document.body.classList.contains('rail-open')) return
         const delta = e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 : -1
         const moved = e.key === 'ArrowUp' || e.key === 'ArrowDown' ? cycleView(delta) : cycleFilter(delta)
         // 只有真的接管了才阻止默认行为：待办 / 问答页没有筛选栏，左右键仍留给页面自己处理
@@ -175,9 +178,10 @@ function Shell() {
         }
       } else if (e.key === 'Escape') {
         if (document.querySelector('.modal-mask')) return // 确认框自己处理
-        if (state.navOpen) return actions.closeNav({ restoreFocus: true })
-        if (state.railOpen) return actions.closeRail({ restoreFocus: true })
-        if (state.panelOpen) return actions.closeSettings()
+        if (state.navOpen || document.body.classList.contains('nav-open')) return actions.closeNav({ restoreFocus: true })
+        if (state.railOpen || document.body.classList.contains('rail-open')) return actions.closeRail({ restoreFocus: true })
+        const panel = document.getElementById('settings-panel')
+        if (state.panelOpen || (panel && !panel.classList.contains('hidden'))) return actions.closeSettings()
         actions.closeDrawer()
       }
     }
@@ -244,7 +248,7 @@ function Shell() {
       <EntryDrawer />
 
       <div className={`settings-mask ${state.panelOpen ? '' : 'hidden'}`} id="settings-mask" onClick={actions.closeSettings}></div>
-      {state.panelOpen ? <SettingsPanel /> : <aside className="settings-panel hidden" id="settings-panel" role="dialog" aria-modal="true" aria-label="个性设置" />}
+      <SettingsPanel />
 
       <ToastHost />
       <ConfirmHost />

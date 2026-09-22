@@ -4,7 +4,7 @@
  * 面板内部维护一份 cur（规范化后的设置副本），每次改动实时预览并回调 onChange 触发保存。
  * 数据结构与云端 preferences 列一致，随设置一起同步。
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useStore } from '../state/store'
 import {
   CUSTOM_SAMPLE,
@@ -21,18 +21,6 @@ import { uid } from '../lib/settings'
 import { escapeHtml } from '../lib/ui'
 import { listModels } from '../lib/data'
 import type { ModelInfo, Settings, Vendor } from '../lib/types'
-
-/** data-set 支持三种写法：theme 的裸字段名、effect 的裸字段名、`ai.xxx` 路径 */
-function readSet(cur: Settings, key: string): unknown {
-  if (key === 'customCode') return cur.effect.custom.code
-  if (key.startsWith('ai.')) {
-    const path = key.slice(3)
-    return path.split('.').reduce<unknown>((o, k) => (o == null ? undefined : (o as Record<string, unknown>)[k]), cur.ai)
-  }
-  return key in cur.theme
-    ? (cur.theme as unknown as Record<string, unknown>)[key]
-    : (cur.effect as unknown as Record<string, unknown>)[key]
-}
 
 /** 写回并返回新设置。一律展开原对象，新增的设置组不会在这里被丢掉 */
 function writeSet(cur: Settings, key: string, value: unknown): Settings {
@@ -238,6 +226,13 @@ export function SettingsPanel() {
   const modelsAbort = useRef<AbortController | null>(null)
   const onChange = actions.onSettingsChange
 
+  // 面板常驻 DOM；每次重新打开时从 store 同步一次，保留旧版“关闭后再开即取最新设置”的行为。
+  useLayoutEffect(() => {
+    if (state.panelOpen) setCur(normalizeSettings(state.settings))
+    // 只在开合边沿同步；layout 阶段完成，避免打开后第一下操作被晚到的 effect 覆盖。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.panelOpen])
+
   /**
    * 模型目录是权威来源，拿不到就把**真实原因**摆出来并给重试按钮 ——
    * 静默降级成"暂无模型"会让人以为是服务端没有模型，而不是读取失败了。
@@ -260,10 +255,10 @@ export function SettingsPanel() {
 
   // 模型目录只在服务器模式下有意义，自定义模式不必发这个请求
   useEffect(() => {
-    if (cur.ai.mode === 'cloud') void reloadModels()
+    if (state.panelOpen && cur.ai.mode === 'cloud') void reloadModels()
     return () => modelsAbort.current?.abort()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cur.ai.mode])
+  }, [cur.ai.mode, state.panelOpen])
 
   // 动效代码编译失败 / 自动停用时，把原因显示在面板里
   useEffect(() => {
@@ -327,7 +322,7 @@ export function SettingsPanel() {
   const onCustom = cur.effect.type === 'custom'
 
   return (
-    <aside className="settings-panel" id="settings-panel" role="dialog" aria-modal="true" aria-label="个性设置">
+    <aside className={`settings-panel ${state.panelOpen ? '' : 'hidden'}`} id="settings-panel" role="dialog" aria-modal="true" aria-label="个性设置">
       <div className="set-head">
         <h2>个性设置</h2>
         <button type="button" className="btn btn-ghost btn-sm" data-set-act="close" onClick={actions.closeSettings}>

@@ -27,7 +27,7 @@ export function AskView({ active }: { active: boolean }) {
 
   useEffect(() => {
     const el = threadRef.current
-    if (el) el.scrollIntoView({ block: 'nearest' })
+    if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'nearest' })
   }, [messages.length, messages[messages.length - 1]?.content])
 
   const submit = () => {

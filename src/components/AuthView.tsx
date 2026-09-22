@@ -39,14 +39,17 @@ export function AuthView({ active, onAuthed }: { active: boolean; onAuthed: (ses
 
   const showError = (msg: string) => setError(msg)
 
-  const takeChallenge = (scope: OtpScope, email: string): Challenge['payload'] | null => {
+  function takeChallenge(scope: 'login-otp', email: string): Awaited<ReturnType<typeof db.auth.signInWithOtp>> | null
+  function takeChallenge(scope: 'signup', email: string): Awaited<ReturnType<typeof db.auth.sendOtp>> | null
+  function takeChallenge(scope: 'reset', email: string): Awaited<ReturnType<typeof db.auth.resetPasswordForEmail>> | null
+  function takeChallenge(scope: OtpScope, email: string): Challenge['payload'] | null {
     const c = challenges.current.get(scope)
-    if (!c || !c.payload || c.email !== email) return null
+    if (!c || c.email !== email) return null
     return c.payload
   }
 
   const clearChallenge = (scope: OtpScope) => {
-    challenges.current.set(scope, { email: '', payload: null })
+    challenges.current.delete(scope)
   }
 
   /** 发送后进入冷却，避免连点导致验证码反复失效 */
@@ -136,7 +139,7 @@ export function AuthView({ active, onAuthed }: { active: boolean; onAuthed: (ses
     const token = (form.elements.namedItem('code') as HTMLInputElement).value.trim()
     showError('')
     const challenge = takeChallenge('login-otp', email)
-    if (!challenge) return showError('请先点「发送验证码」获取邮箱验证码，再填入下方')
+    if (!challenge || !challenge.data) return showError('请先点「发送验证码」获取邮箱验证码，再填入下方')
     await withLoading('login-otp', '登录中…', async () => {
       try {
         const completed = await challenge.data.verify({ token })
@@ -156,11 +159,11 @@ export function AuthView({ active, onAuthed }: { active: boolean; onAuthed: (ses
     const password = (form.elements.namedItem('password') as HTMLInputElement).value
     showError('')
     const challenge = takeChallenge('signup', email)
-    if (!challenge) return showError('请先点「发送验证码」获取邮箱验证码，再填入下方')
+    if (!challenge || !challenge.data) return showError('请先点「发送验证码」获取邮箱验证码，再填入下方')
     await withLoading('signup', '注册中…', async () => {
       try {
         const d = challenge.data
-        if (!('verificationId' in d)) throw new Error('验证码状态异常，请重新获取')
+        if (!d || !('verificationId' in d)) throw new Error('验证码状态异常，请重新获取')
         const completed = await db.auth.verifyOtp({
           verificationId: d.verificationId as string,
           token,
@@ -190,7 +193,7 @@ export function AuthView({ active, onAuthed }: { active: boolean; onAuthed: (ses
     const password = (form.elements.namedItem('password') as HTMLInputElement).value
     showError('')
     const challenge = takeChallenge('reset', email)
-    if (!challenge) return showError('请先点「发送验证码」获取密码重置验证码，再填入下方')
+    if (!challenge || !challenge.data) return showError('请先点「发送验证码」获取密码重置验证码，再填入下方')
     await withLoading('reset', '处理中…', async () => {
       try {
         const completed = await challenge.data.updateUser({ nonce, password })

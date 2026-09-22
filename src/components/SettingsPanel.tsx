@@ -22,18 +22,6 @@ import { escapeHtml } from '../lib/ui'
 import { listModels } from '../lib/data'
 import type { ModelInfo, Settings, Vendor } from '../lib/types'
 
-/** data-set 支持三种写法：theme 的裸字段名、effect 的裸字段名、`ai.xxx` 路径 */
-function readSet(cur: Settings, key: string): unknown {
-  if (key === 'customCode') return cur.effect.custom.code
-  if (key.startsWith('ai.')) {
-    const path = key.slice(3)
-    return path.split('.').reduce<unknown>((o, k) => (o == null ? undefined : (o as Record<string, unknown>)[k]), cur.ai)
-  }
-  return key in cur.theme
-    ? (cur.theme as unknown as Record<string, unknown>)[key]
-    : (cur.effect as unknown as Record<string, unknown>)[key]
-}
-
 /** 写回并返回新设置。一律展开原对象，新增的设置组不会在这里被丢掉 */
 function writeSet(cur: Settings, key: string, value: unknown): Settings {
   if (key === 'customCode') return { ...cur, effect: { ...cur.effect, custom: { code: String(value) } } }

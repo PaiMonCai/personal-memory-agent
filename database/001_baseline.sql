@@ -1,5 +1,9 @@
 -- Personal Memory Agent · self-hosted PostgreSQL baseline
 -- The database is private infrastructure. Only the Hono API should connect to it.
+-- IMPORTANT: execute this file as the same PostgreSQL role used by DATABASE_URL.
+-- Running it as another owner (for example postgres) can leave the app role unable
+-- to perform future schema upgrades. Use database/repair_ownership.sql to repair
+-- an existing installation with mismatched ownership.
 
 begin;
 

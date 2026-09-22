@@ -58,13 +58,22 @@ ask_secret() {
 }
 
 ask_yes_no() {
-  local prompt="$1" default="${2:-y}" hint value
+  local prompt="$1" default="${2:-y}" hint value=""
   if [[ "$default" == "y" ]]; then hint="Y/n"; else hint="y/N"; fi
-  value="$(ask_default "$prompt" "$hint")"
+  if [[ -w /dev/tty ]]; then
+    printf '%s [%s]: ' "$prompt" "$hint" > /dev/tty
+  else
+    printf '%s [%s]: ' "$prompt" "$hint" >&2
+  fi
+  tty_read value
+  if [[ -z "$value" ]]; then
+    [[ "$default" == "y" ]]
+    return
+  fi
   case "${value,,}" in
-    y|yes|Y/n|y/n) return 0 ;;
+    y|yes) return 0 ;;
     n|no) return 1 ;;
-    *) [[ "$default" == "y" ]] ;;
+    *) warn "请输入 y 或 n。"; ask_yes_no "$prompt" "$default" ;;
   esac
 }
 
@@ -364,7 +373,7 @@ print_summary() {
 
 main() {
   require_root
-  clear
+  clear 2>/dev/null || true
   cat <<'BANNER'
 ============================================================
  Personal Memory Agent · 一键交互安装器

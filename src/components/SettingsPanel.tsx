@@ -20,6 +20,7 @@ import { EFFECTS } from '../lib/effects'
 import { uid } from '../lib/settings'
 import { escapeHtml } from '../lib/ui'
 import { listModels } from '../lib/data'
+import { admin, type AdminMailSettings } from '../lib/api'
 import type { ModelInfo, Settings, Vendor } from '../lib/types'
 
 /** 写回并返回新设置。一律展开原对象，新增的设置组不会在这里被丢掉 */
@@ -212,6 +213,110 @@ function VendorCard({ vendor, picked, onField, onPick, onDeleteVendor, onAddMode
         </button>
       </div>
     </div>
+  )
+}
+
+const EMPTY_MAIL: AdminMailSettings = {
+  host: '',
+  port: 465,
+  secure: true,
+  user: '',
+  from: '',
+  configured: false,
+  hasPassword: false,
+  source: 'environment',
+}
+
+function AdminMailPanel({ adminEmail, open }: { adminEmail: string; open: boolean }) {
+  const [mail, setMail] = useState<AdminMailSettings>(EMPTY_MAIL)
+  const [password, setPassword] = useState('')
+  const [status, setStatus] = useState('尚未读取邮件配置')
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    let alive = true
+    void (async () => {
+      setStatus('正在读取邮件配置…')
+      try {
+        const value = await admin.getMail()
+        if (!alive) return
+        setMail(value)
+        setStatus(value.configured ? `SMTP 已配置（${value.source === 'database' ? '后台配置' : '环境变量'}）` : 'SMTP 尚未配置')
+      } catch (err) {
+        if (alive) setStatus((err as Error)?.message || '读取 SMTP 配置失败')
+      }
+    })()
+    return () => { alive = false }
+  }, [open])
+
+  const patch = <K extends keyof AdminMailSettings>(key: K, value: AdminMailSettings[K]) =>
+    setMail((cur) => ({ ...cur, [key]: value }))
+
+  const save = async () => {
+    setBusy(true)
+    setStatus('正在保存…')
+    try {
+      const value = await admin.saveMail({
+        host: mail.host.trim(),
+        port: Number(mail.port) || 465,
+        secure: mail.secure,
+        user: mail.user.trim(),
+        ...(password ? { password } : {}),
+        from: mail.from.trim(),
+      })
+      setMail(value)
+      setPassword('')
+      setStatus('SMTP 已保存并立即生效')
+    } catch (err) {
+      setStatus((err as Error)?.message || '保存 SMTP 配置失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const test = async () => {
+    setBusy(true)
+    setStatus(`正在向 ${adminEmail} 发送测试邮件…`)
+    try {
+      await admin.testMail(adminEmail)
+      setStatus('测试邮件已发送，请检查管理员邮箱')
+    } catch (err) {
+      setStatus((err as Error)?.message || '测试邮件发送失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="set-group" data-admin-mail>
+      <h3>管理员 · 邮件服务</h3>
+      <input className="set-input" type="text" aria-label="SMTP Host" placeholder="SMTP Host，例如 smtp.example.com"
+        value={mail.host} onChange={(e) => patch('host', e.target.value)} />
+      <div className="set-row">
+        <span className="set-label">SMTP 端口</span>
+        <input className="set-input" style={{ maxWidth: 128 }} type="number" min={1} max={65535}
+          value={mail.port} onChange={(e) => patch('port', Number(e.target.value))} />
+      </div>
+      <SwitchRow label="SSL/TLS（通常 465 开启，587 关闭）" checked={mail.secure} dataKey="smtp.secure" onChange={(v) => patch('secure', v)} />
+      <input className="set-input" type="text" aria-label="SMTP 用户名" placeholder="SMTP 用户名"
+        value={mail.user} onChange={(e) => patch('user', e.target.value)} />
+      <input className="set-input" type="password" aria-label="SMTP 密码" autoComplete="new-password"
+        placeholder={mail.hasPassword ? 'SMTP 密码（留空保留现有密码）' : 'SMTP 密码'}
+        value={password} onChange={(e) => setPassword(e.target.value)} />
+      <input className="set-input" type="text" aria-label="发件人" placeholder="信息管家 <mailer@example.com>"
+        value={mail.from} onChange={(e) => patch('from', e.target.value)} />
+      <div className="model-add">
+        <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => void save()}>
+          保存 SMTP
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" disabled={busy || !mail.configured} onClick={() => void test()}>
+          发送测试
+        </button>
+      </div>
+      <p className="set-hint">保存后无需重启容器；SMTP 密码会加密存入数据库。</p>
+      <p className="set-hint" aria-live="polite">{status}</p>
+    </section>
   )
 }
 
@@ -620,6 +725,10 @@ export function SettingsPanel() {
           />
           <p className="set-hint">单次回复的 token 上限，0 表示交给服务端默认。</p>
         </section>
+
+        {state.user?.role === 'admin' ? (
+          <AdminMailPanel adminEmail={state.user.email} open={state.panelOpen} />
+        ) : null}
 
         <section className="set-group">
           <h3>界面</h3>

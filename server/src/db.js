@@ -31,3 +31,16 @@ export async function tx(fn) {
 export async function pingDb() {
   await query('select 1')
 }
+
+
+export async function ensureSchema() {
+  await query("alter table users add column if not exists role text not null default 'user'")
+  await query("create index if not exists users_role_idx on users(role)")
+  await query(`
+    create table if not exists system_settings (
+      key text primary key,
+      value jsonb not null default '{}'::jsonb,
+      updated_at timestamptz not null default now()
+    )
+  `)
+}

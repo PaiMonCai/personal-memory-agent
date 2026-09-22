@@ -29,7 +29,7 @@ export type ViewName = 'inbox' | 'todo' | 'ask' | 'review'
 
 export interface AppState {
   phase: 'boot' | 'auth' | 'app'
-  user: { id: string; email: string } | null
+  user: { id: string; email: string; role: string } | null
   entries: Entry[]
   searchResults: Entry[]
   links: EntryLink[]
@@ -248,7 +248,7 @@ const initialState: AppState = {
 export const UNDO_MS = 6000
 
 export interface AppActions {
-  enterApp: (session: { user: { id: string; email: string } }) => Promise<void>
+  enterApp: (session: { user: { id: string; email: string; role: string } }) => Promise<void>
   logout: () => Promise<void>
   goAuth: () => void
   refreshAll: () => Promise<void>

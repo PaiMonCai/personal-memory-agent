@@ -92,3 +92,34 @@ export function decryptAiSettings(ai) {
     : []
   return { ...ai, custom: { ...custom, vendors } }
 }
+
+
+function systemEncryptionKey() {
+  const raw = String(config.systemConfigKey || '').trim()
+  if (!raw) throw Object.assign(new Error('SYSTEM_CONFIG_ENCRYPTION_KEY 未配置'), { code: 'config_error' })
+  return createHash('sha256').update(raw).digest()
+}
+
+export function encryptSystemSecret(value) {
+  if (!value) return ''
+  const iv = randomBytes(12)
+  const cipher = createCipheriv('aes-256-gcm', systemEncryptionKey(), iv)
+  const encrypted = Buffer.concat([cipher.update(String(value), 'utf8'), cipher.final()])
+  const tag = cipher.getAuthTag()
+  return `v1.${iv.toString('base64url')}.${tag.toString('base64url')}.${encrypted.toString('base64url')}`
+}
+
+export function decryptSystemSecret(value) {
+  if (!value || typeof value !== 'string' || !value.startsWith('v1.')) return value || ''
+  const [, ivRaw, tagRaw, dataRaw] = value.split('.')
+  try {
+    const decipher = createDecipheriv('aes-256-gcm', systemEncryptionKey(), Buffer.from(ivRaw, 'base64url'))
+    decipher.setAuthTag(Buffer.from(tagRaw, 'base64url'))
+    return Buffer.concat([
+      decipher.update(Buffer.from(dataRaw, 'base64url')),
+      decipher.final(),
+    ]).toString('utf8')
+  } catch {
+    throw Object.assign(new Error('SMTP 密码无法解密，请在管理设置中重新保存'), { code: 'config_error' })
+  }
+}

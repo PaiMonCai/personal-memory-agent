@@ -19,7 +19,7 @@ interface Challenge {
   payload: Awaited<ReturnType<typeof db.auth.signInWithOtp>> | Awaited<ReturnType<typeof db.auth.sendOtp>> | Awaited<ReturnType<typeof db.auth.resetPasswordForEmail>>
 }
 
-export function AuthView({ active, onAuthed }: { active: boolean; onAuthed: (session: { user: { id: string; email: string } }) => void }) {
+export function AuthView({ active, onAuthed }: { active: boolean; onAuthed: (session: { user: { id: string; email: string; role: string } }) => void }) {
   const [tab, setTab] = useState<Tab>('login')
   const [loginMode, setLoginMode] = useState<LoginMode>('password')
   const [error, setError] = useState('')

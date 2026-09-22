@@ -177,7 +177,7 @@ authRoutes.post('/signup', async (c) => {
   const user = await tx(async (client) => {
     await consumeChallenge({ challengeId, email, code, purpose: 'signup' }, client)
     const { rows } = await client.query(
-      'insert into users (email, password_hash) values ($1, $2) returning id, email',
+      'insert into users (email, password_hash) values ($1, $2) returning id, email, role',
       [email, passwordHash]
     )
     return rows[0]

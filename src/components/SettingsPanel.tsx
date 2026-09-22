@@ -4,7 +4,7 @@
  * 面板内部维护一份 cur（规范化后的设置副本），每次改动实时预览并回调 onChange 触发保存。
  * 数据结构与云端 preferences 列一致，随设置一起同步。
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useStore } from '../state/store'
 import {
   CUSTOM_SAMPLE,
@@ -227,9 +227,9 @@ export function SettingsPanel() {
   const onChange = actions.onSettingsChange
 
   // 面板常驻 DOM；每次重新打开时从 store 同步一次，保留旧版“关闭后再开即取最新设置”的行为。
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (state.panelOpen) setCur(normalizeSettings(state.settings))
-    // 只在开合边沿同步，编辑中的每次 state.settings 更新不能反向覆盖输入。
+    // 只在开合边沿同步；layout 阶段完成，避免打开后第一下操作被晚到的 effect 覆盖。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.panelOpen])
 

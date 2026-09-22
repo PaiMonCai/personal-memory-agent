@@ -2,12 +2,15 @@ import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
 import { secureHeaders } from 'hono/secure-headers'
 import { config, assertRuntimeConfig } from './config.js'
-import { pingDb, pool } from './db.js'
+import { ensureSchema, pingDb, pool } from './db.js'
 import { authRoutes, requireUser } from './auth.js'
 import { dataRoutes } from './data.js'
 import { aiRoutes } from './ai.js'
+import { adminRoutes, ensureBootstrapAdmin, setupStatus } from './admin.js'
 
 assertRuntimeConfig()
+await ensureSchema()
+await ensureBootstrapAdmin()
 
 const app = new Hono()
 app.use('*', secureHeaders())
@@ -28,7 +31,9 @@ app.get('/api/health', async (c) => {
   return c.json({ ok: true })
 })
 
+app.get('/api/setup/status', async (c) => c.json(await setupStatus()))
 app.route('/api/auth', authRoutes)
+app.route('/api/admin', adminRoutes)
 
 const protectedApi = new Hono()
 protectedApi.use('*', requireUser)

@@ -26,7 +26,34 @@
 - Web：Nginx
 - 部署：Docker Compose
 
-## 快速部署
+## 一键交互安装（推荐）
+
+在一台新的 Linux 服务器上，直接以 root 运行：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/PaiMonCai/personal-memory-agent/main/install.sh | bash
+```
+
+安装器会交互完成：
+
+- Docker / Compose 环境检查（缺失时可自动安装）
+- 安装目录与代码拉取 / 更新
+- Web 端口与 `APP_ORIGIN`
+- 管理员邮箱与密码（密码可留空自动生成）
+- OTP / 配置加密等随机密钥
+- 可选的默认 OpenAI-compatible AI 接口
+- PostgreSQL 数据库接入
+- Docker Compose 启动与 `/api/health` 健康检查
+
+数据库可选择：
+
+1. **内置 PostgreSQL 16 容器**：推荐新部署，不暴露 5432。
+2. **宿主机 PostgreSQL**：自动检测系统 PostgreSQL 或 1Panel / Docker PostgreSQL，并自动建库、建用户和组网。
+3. **外部 PostgreSQL**：输入 `DATABASE_URL`，安装器会从应用所在 Docker 网络验证并初始化。
+
+健康检查通过后，安装器会自动清空 `.env` 中的明文 `BOOTSTRAP_ADMIN_PASSWORD`。若密码由安装器自动生成，只会在安装结束时显示一次。
+
+## 手动部署
 
 ```bash
 cp .env.example .env
@@ -71,10 +98,11 @@ http://服务器IP:8080
 bash deploy/setup-database.sh
 ```
 
-脚本提供两种模式：
+脚本提供三种模式：
 
 - **宿主机 PostgreSQL**：自动检测本机 PostgreSQL。若数据库本身运行在 Docker / 1Panel 容器中，会创建专用 `pma-db-link` 网络并把 API 与数据库容器直接连接；若是系统 PostgreSQL，则自动配置 Docker 到宿主机的访问、数据库用户、数据库、必要扩展与 `pg_hba.conf`。
 - **外部 PostgreSQL**：输入完整 `DATABASE_URL` 后，从与应用相同的 Docker 网络验证连接，并执行数据库基线初始化。
+- **内置 PostgreSQL 容器**：自动生成数据库密码并使用 Docker 私网连接，适合全新部署。
 
 宿主机模式会自动创建或更新 `pma` 应用用户和数据库，并在发现历史表 owner 不一致时调用 `database/repair_ownership.sql` 修复。脚本最后会生成 `.pma-db-compose.yml`，避免原始 `docker-compose.yml` 中内置 PostgreSQL 的 `DATABASE_URL` 覆盖外部配置。
 

@@ -23,7 +23,7 @@ import { dueHint, PRIORITY_META, fmtDate } from '../lib/ui'
 import { memoryChunks, mdTitle } from '../lib/memory'
 import { SETTINGS_CACHE_KEY, readRaw, removeKey, writeRaw } from '../lib/storage'
 import { toast } from '../lib/overlays'
-import type { ChatMessage, Entry, EntryLink, Review, Settings } from '../lib/types'
+import type { AnalysisResult, ChatMessage, Entry, EntryLink, Review, Settings } from '../lib/types'
 
 export type ViewName = 'inbox' | 'todo' | 'ask' | 'review'
 
@@ -261,7 +261,7 @@ export interface AppActions {
   saveEntryAndAnalyze: (
     rawText: string,
     opts?: { titleHint?: string }
-  ) => Promise<{ ok: true; entry: Entry; result: ai.AnalysisResult } | { ok: false; error: unknown }>
+  ) => Promise<{ ok: true; entry: Entry; result: AnalysisResult } | { ok: false; error: unknown }>
   handleMdFiles: (files: File[]) => Promise<void>
   toggleEntry: (id: number) => Promise<void>
   removeEntry: (id: number) => void
@@ -292,7 +292,7 @@ export interface AppActions {
 export interface Store {
   state: AppState
   actions: AppActions
-  appRef: React.RefObject<HTMLDivElement | null>
+  appRef: React.RefObject<HTMLDivElement>
   narrow: () => boolean
   /** 与旧实现一致的派生数据：待删过滤后的全量、当前筛选可见、关联、待办分组 */
   derived: {
@@ -324,7 +324,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const stateRef = useRef(state)
   stateRef.current = state
 
-  const appRef = useRef<HTMLDivElement | null>(null)
+  const appRef = useRef<HTMLDivElement>(null)
   const askController = useRef<AbortController | null>(null)
   const settingsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   /** 待删除队列：id -> timer。删除先从界面移除并给 6 秒撤销窗口，到点才真正落库 */

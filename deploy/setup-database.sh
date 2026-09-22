@@ -28,16 +28,33 @@ as_root() {
 }
 
 prompt_default() {
-  local prompt="$1" default="$2" value
-  read -r -p "$prompt [$default]: " value
+  local prompt="$1" default="$2" value=""
+  if [[ -r /dev/tty && -w /dev/tty ]]; then
+    printf '%s [%s]: ' "$prompt" "$default" > /dev/tty
+    IFS= read -r value < /dev/tty || true
+  else
+    IFS= read -r -p "$prompt [$default]: " value || true
+  fi
   printf '%s' "${value:-$default}"
 }
 
 prompt_secret() {
-  local prompt="$1" value
-  read -r -s -p "$prompt: " value
-  printf '\n' >&2
+  local prompt="$1" value=""
+  if [[ -r /dev/tty && -w /dev/tty ]]; then
+    printf '%s: ' "$prompt" > /dev/tty
+    IFS= read -r -s value < /dev/tty || true
+    printf '\n' > /dev/tty
+  else
+    IFS= read -r -s -p "$prompt: " value || true
+    printf '\n' >&2
+  fi
   printf '%s' "$value"
+}
+
+get_env() {
+  local key="$1"
+  [[ -f "$ENV_FILE" ]] || return 0
+  sed -n "s/^${key}=//p" "$ENV_FILE" | tail -n1
 }
 
 validate_ident() {
@@ -155,7 +172,7 @@ __DB_API_NETWORK__
       dockerfile: Dockerfile.web
     restart: unless-stopped
     ports:
-      - "${PMA_WEB_PORT:-8080}:80"
+      - "${PMA_BIND_ADDRESS:-0.0.0.0}:${PMA_WEB_PORT:-8080}:80"
     depends_on:
       - api
     networks:
@@ -179,6 +196,78 @@ YAML
   else
     sed -i '/__DB_API_NETWORK__/d;/__DB_NETWORK_DECL__/d' "$GENERATED_COMPOSE"
   fi
+}
+
+write_managed_compose() {
+  cat > "$GENERATED_COMPOSE" <<'YAML'
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pma
+      POSTGRES_USER: pma
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pma_postgres:/var/lib/postgresql/data
+      - ./database/001_baseline.sql:/docker-entrypoint-initdb.d/001_baseline.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pma -d pma"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - pma
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - pma
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    restart: unless-stopped
+    ports:
+      - "${PMA_BIND_ADDRESS:-0.0.0.0}:${PMA_WEB_PORT:-8080}:80"
+    depends_on:
+      - api
+    networks:
+      - pma
+
+networks:
+  pma:
+    external: true
+    name: pma-app-link
+
+volumes:
+  pma_postgres:
+YAML
+}
+
+setup_managed_db() {
+  local app_password
+  ensure_app_network
+  app_password="$(get_env POSTGRES_PASSWORD)"
+  case "$app_password" in
+    ""|change-me|replace-with-a-strong-database-password) app_password="$(generate_password)" ;;
+  esac
+
+  set_env POSTGRES_PASSWORD "$app_password"
+  set_env DATABASE_URL "postgres://pma:${app_password}@postgres:5432/pma"
+  write_managed_compose
+  log "已配置内置 PostgreSQL 16 容器，数据库仅通过 Docker 私网访问。"
 }
 
 system_admin_psql() {
@@ -350,6 +439,7 @@ Personal Memory Agent · 数据库接入助手
 
   1) 宿主机 PostgreSQL（自动检测、建库、建用户、组网）
   2) 外部 PostgreSQL（验证连接并初始化）
+  3) 内置 PostgreSQL 容器（最省事）
 
 MENU
   local choice
@@ -357,6 +447,7 @@ MENU
   case "$choice" in
     1) setup_host_db ;;
     2) setup_external_db ;;
+    3) setup_managed_db ;;
     *) die "无效选择：$choice" ;;
   esac
 

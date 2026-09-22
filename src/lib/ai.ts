@@ -56,7 +56,7 @@ function aiCfg(): AiCfg {
  * 服务器模式下取模型；自定义模式下从供应商清单里解析出"当前这一家 + 这一个模型"。
  * 模型目录是权威来源：为空就明确报错，绝不硬编码模型 id。
  */
-export async function getModel(): Promise<{ id: string; vendor?: string; temperature: number }> {
+export async function getModel(): Promise<{ id: string; vendor?: string; temperature?: number }> {
   const cfg = aiCfg()
   if (cfg.mode === 'custom') {
     const issue = customModelIssue(cfg)

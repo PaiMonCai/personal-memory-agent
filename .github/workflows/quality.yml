@@ -49,7 +49,10 @@ jobs:
       - name: TypeScript check
         run: npm run check
 
+      # PR 上验证两个 Dockerfile 都能构建；main 的推送由 docker-publish.yml
+      # 构建并发布，顺带覆盖这一步，这里跳过以免重复构建
       - name: Build production images
+        if: github.event_name == 'pull_request'
         run: |
           docker build -t personal-memory-agent-api:test .
           docker build -f Dockerfile.web -t personal-memory-agent-web:test .

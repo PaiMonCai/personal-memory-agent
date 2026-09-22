@@ -1,0 +1,57 @@
+name: Publish images
+
+# 推送到 main 时自动构建并发布两个镜像到 GitHub Container Registry：
+#   ghcr.io/<owner>/<repo>-api   自建后端（Hono + PostgreSQL 客户端）
+#   ghcr.io/<owner>/<repo>-web   前端静态资源（Nginx）
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # GHCR 的镜像名必须全小写；owner 名里出现大写时会直接推送失败
+      - name: Compute image prefix
+        id: meta
+        run: |
+          PREFIX="ghcr.io/${{ github.repository }}"
+          PREFIX=$(echo "$PREFIX" | tr 'A-Z' 'a-z')
+          echo "prefix=$PREFIX" >> "$GITHUB_OUTPUT"
+          echo "镜像前缀：$PREFIX"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.prefix }}-api:latest
+            ${{ steps.meta.outputs.prefix }}-api:${{ github.sha }}
+
+      - name: Build and push Web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.web
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.prefix }}-web:latest
+            ${{ steps.meta.outputs.prefix }}-web:${{ github.sha }}

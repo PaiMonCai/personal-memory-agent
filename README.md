@@ -223,6 +223,13 @@ python tools/static-check.py
 
 `tools/dom-test.mjs` 覆盖启动、视图切换、三栏抽屉与互斥、滚动锁、撤销删除、键盘快捷键、`Esc` 分层关闭、拖拽导入、设置面板特效联动、自定义 JS 动效、筛选栏滑动指示器等 205 项断言。测试入口是 `tools/test-entry.tsx`：由 esbuild 打成单个 IIFE 后在 jsdom 里执行，并以 legacy 模式挂载 React —— 用例里「点击后立即断言 DOM」的写法依赖旧实现那样的同步渲染。
 
+镜像发布会话：推送到 `main` 会触发 `.github/workflows/docker-publish.yml`，自动构建并推送两个镜像到 GitHub Container Registry：
+
+- `ghcr.io/<owner>/<repo>-api` —— 自建后端（Hono）
+- `ghcr.io/<owner>/<repo>-web` —— 前端静态资源（Nginx）
+
+标签为 `latest` 与当次 commit 的 SHA，推送用内置 `GITHUB_TOKEN`，无需额外配置 Secrets。拉取后分别替代 `docker-compose.yml` 里 `api` / `web` 两个服务的 `build` 段即可（把 `image:` 指向上面的地址并删掉 `build`）。镜像默认私有，可在仓库的 Packages 页面改可见性。
+
 `tools/static-check.py` 是**另一层必要的校验**：DOM 测试断言的是属性与 class，而真正决定用户看到什么的是 CSS，两者脱节就会漏 bug。所以显隐、布局这类契约要在 CSS 文本层面再断言一次（详见下节）。
 
 GitHub Actions 会在推送与 PR 上自动执行类型检查、生产构建、DOM 回归、静态契约、WCAG 对比度，并在临时 PostgreSQL 16 中实际加载 `database/001_baseline.sql`。

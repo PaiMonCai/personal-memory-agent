@@ -69,9 +69,10 @@ export async function getPublicMailSettings() {
 
 export async function saveMailSettings(input) {
   const old = (await storedSmtp()) || {}
+  const current = await resolveMailConfig()
   const password =
     input.password === undefined || input.password === ''
-      ? String(old.password || '')
+      ? String(old.password || (current.pass ? encryptSystemSecret(current.pass) : ''))
       : encryptSystemSecret(String(input.password))
 
   const value = {

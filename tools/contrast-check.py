@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""按 WCAG 2.2 AA 核对 style.css 里的配色对比度。
+"""按 WCAG 2.2 AA 核对 src/styles/app.css 里的配色对比度。
 
 正文文字需 ≥ 4.5:1；大字号与 UI 组件边界需 ≥ 3:1。
 配色会随主题预设与用户自定义色变化，所以这个检查要能随时复跑。
@@ -10,7 +10,7 @@ import pathlib
 import re
 import sys
 
-CSS_PATH = pathlib.Path(__file__).resolve().parent.parent / "assets" / "style.css"
+CSS_PATH = pathlib.Path(__file__).resolve().parent.parent / "src" / "styles" / "app.css"
 CSS = CSS_PATH.read_text(encoding="utf-8")
 
 

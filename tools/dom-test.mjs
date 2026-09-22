@@ -1,44 +1,61 @@
 /**
- * DOM 回归测试（jsdom）——验证静态检查抓不到的运行时行为：
- * 模块能否加载、顶层代码是否抛错、事件绑定是否生效、
- * 视图切换 / 导航抽屉 / 滚动锁 / 焦点管理 / 撤销删除是否按预期工作。
+ * DOM 回归测试（jsdom）—— 验证静态检查抓不到的运行时行为：
+ * 模块能否加载、界面是否渲染出来、事件绑定是否生效、
+ * 视图切换 / 导航抽屉 / 滚动锁 / 焦点管理 / 拖拽删除是否按预期工作。
  *
- * 运行方式（需要 jsdom）：
- *   npm install jsdom --prefix <某个目录>
- *   NODE_PATH=<那个目录>/node_modules node tools/dom-test.mjs
+ * 运行方式（jsdom 与 vite 都是 package.json 的 devDependencies）：
+ *   npm install
+ *   node tools/dom-test.mjs
  *
- * 说明：自建 /api 用 fetch 假实现替换，因此不发任何真实网络请求。
+ * 两点说明：
+ *  1. 自建 /api 用 fetch 假实现替换，因此测试过程不发任何真实网络请求；
+ *  2. 应用由 esbuild 打成单个 IIFE 后在 jsdom 里执行，
+ *     挂载用 legacy 的 ReactDOM.render —— 用例里「点击后立即断言 DOM」的写法
+ *     依赖旧实现那样的同步渲染，createRoot 的并发调度会让断言读到上一帧。
  */
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
 
 let JSDOM
+let esbuild
 try {
   ;({ JSDOM } = require('jsdom'))
 } catch {
-  console.error('未找到 jsdom。请先安装，并用 NODE_PATH 指向它的 node_modules：')
-  console.error('  npm install jsdom --prefix <dir>')
-  console.error('  NODE_PATH=<dir>/node_modules node tools/dom-test.mjs')
+  console.error('找不到 jsdom。请先 npm install（jsdom 是 devDependencies 之一）。')
+  process.exit(1)
+}
+try {
+  esbuild = require('esbuild')
+} catch {
+  console.error('找不到 esbuild。请先 npm install（esbuild 是 devDependencies 之一）。')
   process.exit(1)
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const APP = path.resolve(__dirname, '..')
-const SRC = path.join(APP, 'assets', 'js')
+const OUT = path.join(APP, '.tmp', 'dom-test')
 
-// ---------- 1) 生成可直接 import 的模块副本（去掉 ?v= 参数、改扩展名）
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'pma-dom-test-'))
-for (const f of fs.readdirSync(SRC).filter((n) => n.endsWith('.js'))) {
-  let s = fs.readFileSync(path.join(SRC, f), 'utf8')
-  s = s.replace(/from\s+'(\.[^']+?)\.js\?v=[^']+'/g, "from '$1.mjs'")
-  s = s.replace(/from\s+'(\.[^']+?)\.js'/g, "from '$1.mjs'")
-  fs.writeFileSync(path.join(TMP, f.replace(/\.js$/, '.mjs')), s)
-}
+// ---------- 1) 用 esbuild 把应用（React + TSX）打成单个 IIFE。
+// jsdom 里没有模块系统，也不该依赖 node_modules 的解析路径，所以这里整包打进去。
+// import.meta.env 在 IIFE 里没有意义，用 define 换成空对象 ——
+// 业务代码里的 `import.meta.env.VITE_API_BASE || '/api'` 于是稳定走 '/api'。
+// 入口 tools/test-entry.tsx 还会把三个模块单例挂到 window.__pma 供断言使用。
+fs.mkdirSync(OUT, { recursive: true })
+esbuild.buildSync({
+  entryPoints: [path.join(APP, 'tools', 'test-entry.tsx')],
+  bundle: true,
+  format: 'iife',
+  jsx: 'automatic',
+  target: 'es2022',
+  minify: false,
+  define: { 'import.meta.env': '{}' },
+  outfile: path.join(OUT, 'bundle.js'),
+  logLevel: 'error',
+})
 
 // ---------- 2) 搭 DOM 环境
 const html = fs.readFileSync(path.join(APP, 'index.html'), 'utf8')
@@ -197,14 +214,14 @@ setGlobal('fetch', async (input, init = {}) => {
 })
 
 // ---------- 4) 加载被测应用
+// IIFE 在全局作用域执行：window / document 等全局已由上面的 setGlobal 铺好，
+// 包内的 React 与业务代码直接引用这些全局名。
 const errors = []
 window.addEventListener('error', (e) => errors.push(String(e.message)))
-await import(pathToFileURL(path.join(TMP, 'app.mjs')).href)
-// 与 app 用的是同一份模块实例（同 URL 单例），状态共享。
-// 必须在末尾删掉 TMP 之前取到引用，否则后面 import 会找不到文件。
-const fxMod = await import(pathToFileURL(path.join(TMP, 'effects.mjs')).href)
-const settingsMod = await import(pathToFileURL(path.join(TMP, 'settings.mjs')).href)
-const aiMod = await import(pathToFileURL(path.join(TMP, 'ai.mjs')).href)
+const bundle = fs.readFileSync(path.join(OUT, 'bundle.js'), 'utf8')
+new Function(bundle)()
+// 三个模块单例由 test-entry 挂到 window.__pma：测试直接调用它们时必须与页面同一份实例
+const { fx: fxMod, settings: settingsMod, ai: aiMod } = window.__pma
 await new Promise((r) => setTimeout(r, 400))
 
 // ---------- 5) 断言
@@ -212,7 +229,20 @@ let fail = 0
 const $ = (s) => window.document.querySelector(s)
 const $$ = (s) => Array.from(window.document.querySelectorAll(s))
 const click = (el) => el.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
-const key = (k) => window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: k, bubbles: true }))
+// 键盘事件走的是 document 上的原生监听（不是 React 合成事件），
+// 触发的状态更新在 React 18 里经微任务落定，所以派发后要 await 一拍。
+const key = async (k) => {
+  window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: k, bubbles: true }))
+  await Promise.resolve()
+  await Promise.resolve()
+}
+// React 的受控输入装了 value 追踪器：直接 el.value = x 会被判定为「值没变」，
+// 之后派发的 input 事件整个被忽略。必须走原型链上的原生 setter。
+const setVal = (el, value) => {
+  const proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype
+  Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, value)
+  el.dispatchEvent(new window.Event('input', { bubbles: true }))
+}
 const ok = (cond, name, extra = '') => {
   if (cond) console.log('  PASS ', name)
   else {
@@ -256,9 +286,9 @@ click(undoBtn)
 ok($$('#view-todo .entry').length === 1, '撤销后条目回到列表')
 
 console.log('\n[5] 键盘快捷键')
-key('/')
+await key('/')
 ok(window.document.activeElement === $('#global-search'), '/ 聚焦搜索框')
-key('n')
+await key('n')
 ok(window.document.activeElement === $('#capture-input'), 'n 聚焦随手记')
 
 console.log('\n[6] 窄屏导航抽屉')
@@ -285,18 +315,17 @@ click($('#nav-toggle'))
 ok(window.document.body.classList.contains('nav-open'), '左抽屉已打开')
 ok(!window.document.body.classList.contains('rail-open'), '打开左抽屉时右抽屉自动收起')
 ok($('#rail-toggle').getAttribute('aria-expanded') === 'false', '右抽屉按钮状态已复位')
-key('Escape')
+await key('Escape')
 ok(!window.document.body.classList.contains('nav-open'), 'Esc 关闭左抽屉')
 
 console.log('\n[7] Escape 关闭浮层')
 click($('#nav-toggle'))
-key('Escape')
+await key('Escape')
 ok(!window.document.body.classList.contains('nav-open'), 'Esc 关闭导航抽屉')
 click($$('#view-todo .entry')[0])
-key('Escape')
+await key('Escape')
 ok($('#drawer').classList.contains('hidden'), 'Esc 关闭详情抽屉')
 
-fs.rmSync(TMP, { recursive: true, force: true })
 console.log('\n[8] 拖拽导入 .md')
 {
   const rail = $('#compose-rail')
@@ -781,15 +810,13 @@ console.log('\n[15] AI 模型设置')
 
   // 手填一个目录外的 ID 也要能用
   const manual = panel.querySelector('[data-set="ai.modelId"]')
-  manual.value = 'my-own-model'
-  manual.dispatchEvent(new window.Event('input', { bubbles: true }))
+  setVal(manual, 'my-own-model')
   await new Promise((r) => setTimeout(r, 900))
   ok(
     (window.__prefsWrite.ai || {}).modelId === 'my-own-model',
     `手填模型 ID 被接受（${(window.__prefsWrite.ai || {}).modelId}）`
   )
-  manual.value = ''
-  manual.dispatchEvent(new window.Event('input', { bubbles: true }))
+  setVal(manual, '')
   await frame()
 
   // 切到自定义接口
@@ -816,10 +843,6 @@ console.log('\n[15] AI 模型设置')
     '一开始没有供应商卡片'
   )
 
-  const setVal = (el, value) => {
-    el.value = value
-    el.dispatchEvent(new window.Event('input', { bubbles: true }))
-  }
   const fillVendor = (field, value, idx = 0) => {
     setVal(panel.querySelectorAll(`[data-vendor-field="${field}"]`)[idx], value)
   }
@@ -953,13 +976,11 @@ console.log('\n[15] AI 模型设置')
 
   // 生成参数
   const temp = panel.querySelector('[data-set="ai.temperature"]')
-  temp.value = '0.3'
-  temp.dispatchEvent(new window.Event('input', { bubbles: true }))
+  setVal(temp, '0.3')
   await new Promise((r) => setTimeout(r, 900))
   ok((window.__prefsWrite.ai || {}).temperature === 0.3, '温度被保存')
   const maxt = panel.querySelector('[data-set="ai.maxTokens"]')
-  maxt.value = '1024'
-  maxt.dispatchEvent(new window.Event('input', { bubbles: true }))
+  setVal(maxt, '1024')
   await new Promise((r) => setTimeout(r, 900))
   ok((window.__prefsWrite.ai || {}).maxTokens === 1024, '最大长度被保存')
 

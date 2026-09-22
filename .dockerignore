@@ -1,10 +1,6 @@
 .git
 .github
-.env
+.tmp
+dist
 node_modules
-assets
-database
-deploy
-tools
-index.html
-README.md
+*.log

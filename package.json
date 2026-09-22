@@ -1,18 +1,35 @@
-{
+﻿{
   "name": "personal-memory-agent",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "check": "tsc --noEmit",
     "start": "node server/src/index.js",
-    "dev": "node --watch --env-file-if-exists=.env server/src/index.js",
-    "check": "find server/src assets/js -name '*.js' -print0 | xargs -0 -n1 node --check"
+    "start:api": "node server/src/index.js",
+    "dev:api": "node --watch --env-file-if-exists=.env server/src/index.js",
+    "test:dom": "node tools/dom-test.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.1",
     "bcryptjs": "^3.0.2",
     "hono": "^4.9.8",
     "nodemailer": "^7.0.6",
-    "pg": "^8.16.3"
+    "pg": "^8.16.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "esbuild": "^0.24.0",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5"
   }
 }

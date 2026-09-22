@@ -1,10 +1,24 @@
-/**
+﻿/**
  * 背景动态特效。
  *
  * 单张全屏 canvas，requestAnimationFrame 驱动；指针事件穿透，不影响操作。
  * 页面切到后台时自动暂停，尺寸变化时按 devicePixelRatio 重建（上限 2，避免高分屏掉帧）。
  * 颜色统一取自 CSS 变量 --fx-color，因此切换主题时会自动跟着变。
  */
+
+export interface FxContext {
+  ctx: CanvasRenderingContext2D | null
+  w: number
+  h: number
+  t: number
+  dt: number
+  speed: number
+  intensity: number
+  color: { r: number; g: number; b: number }
+  rgba: (a: number) => string
+  state: Record<string, unknown>
+  rand: (a?: number, b?: number) => number
+}
 
 export const EFFECTS = [
   { id: 'none', label: '无', hint: '干净的纯背景' },
@@ -19,21 +33,21 @@ export const EFFECTS = [
 /** 自定义动效：用户代码作为函数体，只接收 fx 一个参数。 */
 export const CUSTOM_LIMITS = { maxCode: 8000, maxErrors: 3, maxSlow: 5, slowMs: 60 }
 
-export function effectLabel(id) {
+export function effectLabel(id: string): string {
   return (EFFECTS.find((e) => e.id === id) || EFFECTS[0]).label
 }
 
-const BASE_COUNT = { stars: 170, snow: 80, bubbles: 42, orbit: 64, none: 0, aurora: 0 }
+const BASE_COUNT: Record<string, number> = { stars: 170, snow: 80, bubbles: 42, orbit: 64, none: 0, aurora: 0 }
 const MAX_COUNT = 320
 
-let canvas = null
-let ctx = null
+let canvas: HTMLCanvasElement | null = null
+let ctx: CanvasRenderingContext2D | null = null
 let raf = 0
 let running = false
 let last = 0
 let w = 0
 let h = 0
-let particles = []
+let particles: Record<string, number>[] = []
 let cfg = { type: 'none', intensity: 1, speed: 1 }
 let color = { r: 90, g: 96, b: 120 }
 
@@ -55,7 +69,7 @@ function readColor() {
   }
 }
 
-const rgba = (a) => `rgba(${color.r}, ${color.g}, ${color.b}, ${a})`
+const rgba = (a: number) => `rgba(${color.r}, ${color.g}, ${color.b}, ${a})`
 
 /** 主题切换后由外部调用，让粒子颜色跟上 */
 export function refreshEffectPalette() {
@@ -79,15 +93,15 @@ function resize() {
 /* ----------------------------------------------------------- 自定义动效 */
 
 const custom = {
-  fn: null,
-  state: {},
+  fn: null as ((fx: FxContext) => void) | null,
+  state: {} as Record<string, unknown>,
   error: '',
   errors: 0,
   slow: 0,
 }
 
 /** 当前自定义动效的错误信息（空串表示正常） */
-export function customEffectError() {
+export function customEffectError(): string {
   return custom.error
 }
 
@@ -98,7 +112,7 @@ export function customEffectError() {
  * 摸不到本模块的闭包变量（ctx / particles / cfg 等）。
  * 注意它不是安全边界 —— 代码仍以本页身份运行，只应粘贴自己写的或信任的代码。
  */
-export function compileCustom(code) {
+export function compileCustom(code: string): { ok: boolean; error: string } {
   custom.error = ''
   custom.errors = 0
   custom.slow = 0
@@ -113,25 +127,25 @@ export function compileCustom(code) {
     return { ok: false, error: custom.error }
   }
   try {
-    custom.fn = new Function('fx', `"use strict";\n${src}`)
+    custom.fn = new Function('fx', `"use strict";\n${src}`) as (fx: FxContext) => void
     custom.state = {}
     return { ok: true, error: '' }
   } catch (e) {
     custom.fn = null
-    custom.error = String((e && e.message) || e)
+    custom.error = String((e && (e as Error).message) || e)
     return { ok: false, error: custom.error }
   }
 }
 
 /** 出错或卡帧太多就自动停机，并广播给 UI（避免每帧刷屏 + 拖垮页面） */
-function failCustom(reason) {
+function failCustom(reason: string) {
   custom.fn = null
   custom.error = reason
   stop()
   document.dispatchEvent(new CustomEvent('fx-custom-failed', { detail: { reason } }))
 }
 
-function drawCustom(dt) {
+function drawCustom(dt: number) {
   if (!custom.fn) return
   const began = performance.now()
   try {
@@ -150,7 +164,7 @@ function drawCustom(dt) {
     })
   } catch (e) {
     custom.errors++
-    const msg = String((e && e.message) || e)
+    const msg = String((e && (e as Error).message) || e)
     if (custom.errors >= CUSTOM_LIMITS.maxErrors) {
       failCustom(`已自动停用：连续 ${CUSTOM_LIMITS.maxErrors} 次运行出错 —— ${msg}`)
     } else {
@@ -178,8 +192,8 @@ function build() {
   for (let i = 0; i < n; i++) particles.push(spawn(cfg.type, true))
 }
 
-function spawn(type, initial) {
-  const rnd = (a, b) => a + Math.random() * (b - a)
+function spawn(type: string, initial: boolean): Record<string, number> {
+  const rnd = (a: number, b: number) => a + Math.random() * (b - a)
   if (type === 'stars') {
     return {
       x: Math.random() * w,
@@ -225,7 +239,7 @@ function spawn(type, initial) {
 
 /* --------------------------------------------------------------- 绘制 */
 
-function drawStars(dt) {
+function drawStars(dt: number) {
   const sp = cfg.speed
   for (let i = 0; i < particles.length; i++) {
     const p = particles[i]
@@ -244,14 +258,14 @@ function drawStars(dt) {
     if (p.y < -4) p.y = h + 4
     if (p.y > h + 4) p.y = -4
 
-    ctx.beginPath()
-    ctx.fillStyle = rgba(p.a)
-    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2)
-    ctx.fill()
+    ctx!.beginPath()
+    ctx!.fillStyle = rgba(p.a)
+    ctx!.arc(p.x, p.y, p.r, 0, Math.PI * 2)
+    ctx!.fill()
   }
 }
 
-function drawSnow(dt) {
+function drawSnow(dt: number) {
   const sp = cfg.speed
   for (let i = 0; i < particles.length; i++) {
     const p = particles[i]
@@ -265,14 +279,14 @@ function drawSnow(dt) {
     if (p.x < -10) p.x = w + 10
     if (p.x > w + 10) p.x = -10
 
-    ctx.beginPath()
-    ctx.fillStyle = rgba(0.5)
-    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2)
-    ctx.fill()
+    ctx!.beginPath()
+    ctx!.fillStyle = rgba(0.5)
+    ctx!.arc(p.x, p.y, p.r, 0, Math.PI * 2)
+    ctx!.fill()
   }
 }
 
-function drawBubbles(dt) {
+function drawBubbles(dt: number) {
   const sp = cfg.speed
   for (let i = 0; i < particles.length; i++) {
     const p = particles[i]
@@ -282,15 +296,15 @@ function drawBubbles(dt) {
       particles[i] = spawn('bubbles', false)
       continue
     }
-    ctx.beginPath()
-    ctx.strokeStyle = rgba(0.28)
-    ctx.lineWidth = 1.2
-    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2)
-    ctx.stroke()
+    ctx!.beginPath()
+    ctx!.strokeStyle = rgba(0.28)
+    ctx!.lineWidth = 1.2
+    ctx!.arc(p.x, p.y, p.r, 0, Math.PI * 2)
+    ctx!.stroke()
   }
 }
 
-function drawOrbit(dt) {
+function drawOrbit(dt: number) {
   const sp = cfg.speed
   const cx = w / 2
   const cy = h / 2
@@ -306,14 +320,14 @@ function drawOrbit(dt) {
     const x = cx + Math.cos(p.ang) * p.rad
     const y = cy + Math.sin(p.ang) * p.rad * 0.62
     const size = Math.max(0.6, 2.4 * p.life)
-    ctx.beginPath()
-    ctx.fillStyle = rgba(0.55 * p.life)
-    ctx.arc(x, y, size, 0, Math.PI * 2)
-    ctx.fill()
+    ctx!.beginPath()
+    ctx!.fillStyle = rgba(0.55 * p.life)
+    ctx!.arc(x, y, size, 0, Math.PI * 2)
+    ctx!.fill()
   }
 }
 
-function drawAurora(dt) {
+function drawAurora(dt: number) {
   const sp = cfg.speed
   const time = performance.now() / 1000
   const bands = 3
@@ -321,30 +335,30 @@ function drawAurora(dt) {
   for (let b = 0; b < bands; b++) {
     const phase = time * 0.24 * sp + b * 1.7
     const yBase = h * (0.28 + b * 0.19)
-    ctx.beginPath()
-    ctx.moveTo(-20, yBase)
+    ctx!.beginPath()
+    ctx!.moveTo(-20, yBase)
     for (let x = -20; x <= w + 20; x += 22) {
       const y =
         yBase +
         Math.sin(x / 190 + phase) * amp * 0.5 +
         Math.sin(x / 74 - phase * 1.4) * amp * 0.22
-      ctx.lineTo(x, y)
+      ctx!.lineTo(x, y)
     }
-    ctx.lineTo(w + 20, yBase + amp * 1.5)
-    ctx.lineTo(-20, yBase + amp * 1.5)
-    ctx.closePath()
-    const g = ctx.createLinearGradient(0, yBase - amp, 0, yBase + amp * 1.5)
+    ctx!.lineTo(w + 20, yBase + amp * 1.5)
+    ctx!.lineTo(-20, yBase + amp * 1.5)
+    ctx!.closePath()
+    const g = ctx!.createLinearGradient(0, yBase - amp, 0, yBase + amp * 1.5)
     g.addColorStop(0, rgba(0))
     g.addColorStop(0.5, rgba(0.1 + b * 0.015))
     g.addColorStop(1, rgba(0))
-    ctx.fillStyle = g
-    ctx.fill()
+    ctx!.fillStyle = g
+    ctx!.fill()
   }
 }
 
 /* --------------------------------------------------------------- 主循环 */
 
-function frame(ts) {
+function frame(ts: number) {
   raf = requestAnimationFrame(frame)
   if (!ctx) return
   if (!last) last = ts
@@ -391,7 +405,7 @@ function stop() {
 
 /* --------------------------------------------------------------- 对外 */
 
-export function initEffects(el) {
+export function initEffects(el: HTMLCanvasElement | null) {
   canvas = el
   if (!canvas) return
   ctx = canvas.getContext('2d')
@@ -404,7 +418,7 @@ export function initEffects(el) {
   })
 }
 
-export function setEffect(next) {
+export function setEffect(next: { type?: string; intensity?: number; speed?: number; custom?: { code?: string } } | null | undefined) {
   cfg = {
     type: next?.type || 'none',
     intensity: Number(next?.intensity) || 1,

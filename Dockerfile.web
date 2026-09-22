@@ -1,0 +1,25 @@
+# 前端镜像：node 构建 dist/，再由 nginx 静态托管。
+# API 仍是 Dockerfile 里的 Hono 服务，两者通过 docker-compose 的网络互通。
+FROM node:22-alpine AS build
+
+WORKDIR /app
+
+# 先装依赖再拷源码：只要 package.json 没变，这一层就可以复用缓存。
+# 这里不能设 NODE_ENV=production —— 那会让 npm install 跳过 vite / typescript
+# 这些 devDependencies，构建阶段恰恰需要它们。
+COPY package.json ./
+RUN npm install --package-lock=false
+
+COPY tsconfig.json vite.config.ts index.html ./
+COPY tools/test-entry.tsx ./tools/
+COPY src ./src
+
+RUN npm run build
+
+FROM nginx:1.27-alpine
+
+COPY --from=build /app/dist /usr/share/nginx/html
+COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]

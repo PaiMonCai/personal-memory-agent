@@ -25,28 +25,40 @@
 ## 目录结构
 
 ```
-index.html              页面骨架（登录页 + 侧栏 + 主区 + 详情抽屉 + 设置面板容器）
-assets/style.css        样式（含 .sidebar 侧栏、.bg-layer 背景层、html[data-mode="dark"] 深色主题）
-assets/js/config.js     浏览器公开配置（默认只含 /api 路径）
-assets/js/api.js         自建 REST API 客户端（认证 / 数据 / 默认 AI）
-assets/js/ai.js         大模型调用：分析 / 问答 / 复盘 / 待办整理
-assets/js/settings.js   主题预设、自定义配色、布局与动效设置、设置面板渲染与应用
-assets/js/effects.js    动态特效引擎（单 canvas，6 种内置 + 自定义 JS）
-assets/js/ui.js         转义、时间格式化、提示、确认框
-assets/js/app.js        状态、视图渲染与交互（含 md 导入）
-tools/bump-version.py   发布前统一递增静态资源版本号
-tools/dom-test.mjs      jsdom 回归测试：启动、视图切换、三栏抽屉、撤销删除、键盘快捷键
-tools/contrast-check.py WCAG 2.2 AA 对比度核验（浅色 / 深色各 14 与 11 组）
-server/src/             Hono 自建后端（认证 / PostgreSQL / SMTP / AI 网关）
+index.html               Vite 入口页面（#root 挂载点）
+src/main.tsx             应用入口（挂载 React、引入样式）
+src/App.tsx              应用外壳：背景层、启动遮罩、登录页 / 主界面、四视图、抽屉、全局快捷键
+src/state/store.tsx      全局状态与全部交互动作（useReducer + Context，替代旧 app.js 的 state）
+src/components/          Sidebar / Topbar / ComposeRail / EntryDrawer / SettingsPanel / Overlays / AuthView
+src/components/views/    InboxView / TodoView / AskView / ReviewView
+src/lib/api.ts           自建 REST 客户端与认证（request / auth，只访问同源 /api）
+src/lib/data.ts          数据层：条目 / 关联 / 复盘 / 偏好 / 模型目录 / SSE 流转发 / 错误描述
+src/lib/ai.ts            大模型调用：分析 / 问答 / 复盘 / 待办整理（含自定义供应商直连）
+src/lib/settings.ts      主题预设、设置规范化、供应商清单迁移、按路径读写
+src/lib/effects.ts       动态特效引擎（单 canvas，6 种内置 + 自定义 JS）
+src/lib/ui.ts            转义、时间格式化、轻量 Markdown、关键词高亮
+src/lib/filter-ink.ts    筛选栏滑动指示器
+src/lib/memory.ts        长文本分块与 md 导入辅助
+src/lib/overlays.ts      toast / 确认框（事件总线 + React 宿主）
+src/lib/storage.ts       localStorage 读写（设置缓存、悬浮栏位置）
+src/hooks/               悬浮面板拖动 / 浮层同步 / 媒体查询
+src/styles/app.css       样式（含 .sidebar 侧栏、.bg-layer 背景层、html[data-mode="dark"] 深色主题）
+tools/dom-test.mjs       jsdom 回归测试（Vite 打包后在 jsdom 执行）
+tools/contrast-check.py  WCAG 2.2 AA 对比度核验（浅色 / 深色各 14 与 11 组）
+tools/static-check.py    静态契约校验（显隐、布局、断点、CSS 变量、DOM 契约）
+server/src/              Hono 自建后端（认证 / PostgreSQL / SMTP / AI 网关）
 database/001_baseline.sql 自建 PostgreSQL 基线
-docker-compose.yml       PostgreSQL + Hono API + Nginx
-deploy/nginx.conf        静态站点与 /api 反向代理
-.github/workflows/quality.yml GitHub Actions：前端 / 后端 / DOM / SQL / API smoke test
+docker-compose.yml        PostgreSQL + Hono API + Nginx（前端多阶段构建）
+Dockerfile                API 镜像（node:22）
+Dockerfile.web           前端镜像（node:22 构建 dist → nginx 静态托管）
+deploy/nginx.conf         静态站点与 /api 反向代理
+.github/workflows/quality.yml GitHub Actions：类型检查 / 构建 / DOM / 静态契约 / SQL / API smoke test
 ```
 
 ## 技术要点
 
-- **前端无构建步骤**：浏览器直接加载 ES 模块；不依赖任何托管平台 SDK，所有业务请求统一走同源 `/api`。
+- **前端 Vite + React 18 + TypeScript**：`npm run build` 产出带内容哈希的 `dist/`（Nginx 直接托管）；`npm run dev` 本地开发，`/api` 由 Vite 代理到自建后端。不依赖任何托管平台 SDK，所有业务请求统一走同源 `/api`（可用 `VITE_API_BASE` 覆盖）。
+- **状态集中在 store**：视图组件只读 state、调 action；派生数据（筛选结果、待办分组、关联）由 store 统一计算，删除走「6 秒撤销窗口」再落库。
 - **数据自建**：PostgreSQL 16 只允许 Hono API 访问，不向公网暴露 5432；每条业务查询都带当前会话对应的 `owner_id`。
 - **登录**：自建邮箱密码 + 邮箱验证码体系；会话使用 HttpOnly Cookie，数据库只保存会话 token 的 SHA-256 哈希。SMTP、Cookie、验证码均由服务端控制。
 - **默认大模型**：由 Hono 服务端代理 OpenAI 兼容接口，服务端持有 `AI_API_KEY`；浏览器不会拿到默认模型密钥。用户自定义供应商仍可单独配置。
@@ -190,22 +202,30 @@ deploy/nginx.conf        静态站点与 /api 反向代理
 ## 质量校验
 
 ```bash
-# DOM 回归测试（需要 jsdom，用假 /api 替换自建服务，不发真实请求）
-NODE_PATH=<jsdom 目录>/node_modules node tools/dom-test.mjs
+# 安装依赖（首次）
+npm install
+
+# TypeScript 严格模式类型检查
+npm run check
+
+# 生产构建（Vite → dist/）
+npm run build
+
+# DOM 回归测试（Vite 打包后在 jsdom 执行；用假 /api 替换自建服务，不发真实请求）
+node tools/dom-test.mjs
 
 # WCAG 2.2 AA 对比度核验（改了配色就跑一次）
 python tools/contrast-check.py
 
-# 静态契约校验（不跑浏览器，只做文本断言：显隐、布局、断点、CSS 变量）
+# 静态契约校验（不跑浏览器，只做文本断言：显隐、布局、断点、CSS 变量、DOM 契约）
 python tools/static-check.py
-
-# 发布前递增版本号
-python tools/bump-version.py 20260923a
 ```
 
-`tools/dom-test.mjs` 覆盖启动、视图切换、三栏抽屉与互斥、滚动锁、撤销删除、键盘快捷键、`Esc` 分层关闭、拖拽导入、设置面板特效联动、自定义 JS 动效、筛选栏滑动指示器等 176 项断言。
+`tools/dom-test.mjs` 覆盖启动、视图切换、三栏抽屉与互斥、滚动锁、撤销删除、键盘快捷键、`Esc` 分层关闭、拖拽导入、设置面板特效联动、自定义 JS 动效、筛选栏滑动指示器等 205 项断言。测试入口是 `tools/test-entry.tsx`：由 esbuild 打成单个 IIFE 后在 jsdom 里执行，并以 legacy 模式挂载 React —— 用例里「点击后立即断言 DOM」的写法依赖旧实现那样的同步渲染。
 
-`tools/static-check.py` 是**另一层必要的校验**：DOM 测试断言的是属性与 class，而真正决定用户看到什么的是 CSS，两者脱节就会漏 bug。所以显隐、布局这类契约要在 CSS 文本层面再断言一次（详见下节）。\n\nGitHub Actions 会在推送与 PR 上自动执行 JS 语法、DOM 回归、静态契约、WCAG 对比度，并在临时 PostgreSQL 16 中实际加载 `database/001_baseline.sql`。
+`tools/static-check.py` 是**另一层必要的校验**：DOM 测试断言的是属性与 class，而真正决定用户看到什么的是 CSS，两者脱节就会漏 bug。所以显隐、布局这类契约要在 CSS 文本层面再断言一次（详见下节）。
+
+GitHub Actions 会在推送与 PR 上自动执行类型检查、生产构建、DOM 回归、静态契约、WCAG 对比度，并在临时 PostgreSQL 16 中实际加载 `database/001_baseline.sql`。
 
 ## 配色与对比度
 
@@ -255,32 +275,28 @@ docker compose up -d
 
 生产环境应在 Nginx/Caddy/Cloudflare 前面补 HTTPS，并把 `.env` 中 `APP_ORIGIN` 改成实际 HTTPS 域名。
 
-纯前端预览仍可使用：
+本地开发 / 预览前端：
 
 ```bash
-python -m http.server 8081 --bind 127.0.0.1
+npm install
+npm run dev        # Vite dev server，/api 代理到 http://127.0.0.1:3000（可用 API_ORIGIN 覆盖）
+# 或者：构建后用 Hono 之外的静态服务器预览
+npm run build && npm run preview
 ```
 
-但没有 `/api` 时只能查看静态界面，无法登录或读写数据。
+没有 `/api` 时只能查看静态界面，无法登录或读写数据。
 
-## 维护须知：每次发布都要递增版本号
+## 维护须知：缓存与内容哈希
 
 浏览器、Nginx 或前置 CDN 都可能缓存静态资源。重新发布后如果 HTML 与 JS 命中不同版本，
-会出现"新 HTML + 旧 JS"的混合状态，因此所有静态模块都保留统一版本指纹。
+会出现"新 HTML + 旧 JS"的混合状态。
 
-因此所有静态资源引用都带版本指纹，**发布前必须把版本号统一改大**，涉及以下位置：
+迁移到 Vite 后这件事由构建流程接管：`npm run build` 会给 `dist/assets/*` 里的 JS / CSS
+文件名带上内容哈希（如 `app-a1b2c3d4.js`），`index.html` 自动引用当次构建的哈希名。
+内容没变哈希就不变（缓存命中），内容变了哈希必变（缓存自然失效），不需要再手工维护版本号。
 
-- `index.html`：`assets/style.css?v=...` 与 `assets/js/app.js?v=...`
-- 每个 JS 模块的 `import ... from './x.js?v=...'`
+需要留意的只有两点：
 
-版本号必须**全站完全一致**。ES 模块的说明符就是模块标识：同一文件若被写成不同说明符，
-浏览器会分别加载两份同名模块并产生两套模块状态，因此必须保持所有 import 的版本指纹一致。
-
-不要手工改（容易漏，实测漏过一次）。用工具一条命令改完：
-
-```bash
-python tools/bump-version.py 20260923a
-```
-
-它会扫描 `index.html` 与 `assets/js/*.js`，把全部 `?v=xxx` 替换为新值，
-并打印每处修改、旧版本号与新版本号。若一处都没改到会报错退出 —— 那说明资源引用丢了版本参数。
+- 自定义背景图等**运行时**资源仍可能被缓存，必要时在图片 URL 后自带查询参数；
+- `index.html` 本身不携带哈希，Nginx 已按 `try_files` 回退到它；若前置 CDN 缓存了 HTML，
+  发布后刷新一次 CDN 缓存即可。

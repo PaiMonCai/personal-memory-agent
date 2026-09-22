@@ -41,18 +41,21 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
+        run: npm install --package-lock=false
+
+      - name: JavaScript syntax (server)
+        run: find server/src -name '*.js' -print0 | xargs -0 -n1 node --check
+
+      - name: TypeScript check
+        run: npm run check
+
+      - name: Build production images
         run: |
-          npm install --package-lock=false
-          npm install --no-save --package-lock=false jsdom@26
-
-      - name: JavaScript syntax
-        run: find assets/js server/src -name '*.js' -print0 | xargs -0 -n1 node --check
-
-      - name: Build production API image
-        run: docker build -t personal-memory-agent-api:test .
+          docker build -t personal-memory-agent-api:test .
+          docker build -f Dockerfile.web -t personal-memory-agent-web:test .
 
       - name: DOM regression tests
-        run: NODE_PATH="$(npm root)" node tools/dom-test.mjs
+        run: node tools/dom-test.mjs
 
       - name: Static contract checks
         run: python tools/static-check.py

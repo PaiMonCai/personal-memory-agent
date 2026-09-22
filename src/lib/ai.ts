@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 大模型层：分类 / 摘要 / 重点提取 / 关联判断 / 问答 / 阶段复盘。
  *
  * 说明：
@@ -6,23 +6,24 @@
  *  - 自定义供应商仍可按用户设置直连 OpenAI 兼容接口。
  *  - 每个请求的第一条消息必须是本应用自有的 system 消息。
  */
-import { streamChat, listModels } from './api.js?v=20260922t'
-import { customModelIssue, resolveCustomPick } from './settings.js?v=20260922t'
+import { listModels, streamChat } from './data'
+import { customModelIssue, resolveCustomPick } from './settings'
+import type { AiSettings, AnalysisResult, ChatMessage, Entry, ReviewResult } from './types'
 
 const MODEL_CACHE_TTL = 10 * 60 * 1000
-let _model = null
+let _model: { id: string; provider?: string } | null = null
 let _modelAt = 0
 let _modelKey = '' // 缓存要连同"选了哪个模型"一起记，否则改完选择还在拿旧缓存
 
 /* ------------------------------------------------------------ 当前设置 */
 
-let _ai = null
+let _ai: AiSettings | null = null
 
 /**
- * 由 app.js 在设置变化时推入。AI 层不自己去读设置，
+ * 由 store 在设置变化时推入。AI 层不自己去读设置，
  * 这样它只依赖"一个普通的 ai 配置对象"，测试里直接塞假配置就能跑。
  */
-export function useAiSettings(ai) {
+export function useAiSettings(ai: AiSettings | null) {
   const prev = _ai
   _ai = ai && typeof ai === 'object' ? ai : null
   // 来源或模型名变了就让缓存失效
@@ -33,9 +34,17 @@ export function useAiSettings(ai) {
   }
 }
 
-function aiCfg() {
-  const d = { mode: 'cloud', modelId: '', temperature: 1, maxTokens: 0, custom: {} }
-  const a = _ai || {}
+interface AiCfg {
+  mode: 'cloud' | 'custom'
+  modelId: string
+  temperature: number
+  maxTokens: number
+  custom: { pick: string; vendors: AiSettings['custom']['vendors'] }
+}
+
+function aiCfg(): AiCfg {
+  const d = { mode: 'cloud' as const, modelId: '', temperature: 1, maxTokens: 0, custom: { pick: '', vendors: [] } }
+  const a = (_ai || {}) as Partial<AiSettings>
   return {
     ...d,
     ...a,
@@ -47,14 +56,14 @@ function aiCfg() {
  * 服务器模式下取模型；自定义模式下从供应商清单里解析出"当前这一家 + 这一个模型"。
  * 模型目录是权威来源：为空就明确报错，绝不硬编码模型 id。
  */
-export async function getModel() {
+export async function getModel(): Promise<{ id: string; vendor?: string; temperature: number }> {
   const cfg = aiCfg()
   if (cfg.mode === 'custom') {
     const issue = customModelIssue(cfg)
     if (issue) throw new Error(`自定义模型：${issue}`)
     const { vendor, model } = resolveCustomPick(cfg)
     // 自定义模式的模型 id 带上供应商名，日志与报错里一眼能看出是哪一家的哪个模型
-    return { id: model.name, vendor: vendor.name, temperature: cfg.temperature }
+    return { id: model!.name, vendor: vendor!.name, temperature: cfg.temperature }
   }
 
   const want = String(cfg.modelId || '').trim()
@@ -78,10 +87,18 @@ export async function getModel() {
 
 /* --------------------------------------------------------------- 底层调用 */
 
-async function complete({ system, user, json = false, signal, onDelta }) {
+interface CompleteArgs {
+  system: string
+  user: string
+  json?: boolean
+  signal?: AbortSignal
+  onDelta?: (delta: string) => void
+}
+
+async function complete({ system, user, json = false, signal, onDelta }: CompleteArgs): Promise<string> {
   const cfg = aiCfg()
   const model = await getModel()
-  const messages = [
+  const messages: ChatMessage[] = [
     { role: 'system', content: system },
     { role: 'user', content: user },
   ]
@@ -98,8 +115,8 @@ async function complete({ system, user, json = false, signal, onDelta }) {
     temperature: typeof cfg.temperature === 'number' ? cfg.temperature : 1,
     signal,
   }
-  if (json) params.response_format = { type: 'json_object' }
-  if (cfg.maxTokens > 0) params.max_tokens = cfg.maxTokens
+  if (json) (params as Record<string, unknown>).response_format = { type: 'json_object' }
+  if (cfg.maxTokens > 0) (params as Record<string, unknown>).max_tokens = cfg.maxTokens
 
   let text = ''
   for await (const chunk of streamChat(params)) {
@@ -119,7 +136,19 @@ async function complete({ system, user, json = false, signal, onDelta }) {
  * 自定义供应商由浏览器直接 fetch，并手解 SSE。
  * 兼容两种返回：真正的流式（text/event-stream）和一次性 JSON —— 有些网关不转发流。
  */
-async function completeViaCustom({ cfg, messages, json, signal, onDelta }) {
+async function completeViaCustom({
+  cfg,
+  messages,
+  json,
+  signal,
+  onDelta,
+}: {
+  cfg: AiCfg
+  messages: ChatMessage[]
+  json?: boolean
+  signal?: AbortSignal
+  onDelta?: (delta: string) => void
+}): Promise<string> {
   const issue = customModelIssue(cfg)
   if (issue) throw new Error(`自定义模型：${issue}`)
 
@@ -129,7 +158,7 @@ async function completeViaCustom({ cfg, messages, json, signal, onDelta }) {
   if (!vendor || !model) throw new Error('自定义模型还没有选中可用的模型')
 
   const url = `${String(vendor.baseUrl).replace(/\/+$/, '')}/chat/completions`
-  const body = {
+  const body: Record<string, unknown> = {
     model: model.name,
     messages,
     stream: true,
@@ -138,7 +167,7 @@ async function completeViaCustom({ cfg, messages, json, signal, onDelta }) {
   if (cfg.maxTokens > 0) body.max_tokens = cfg.maxTokens
   if (json) body.response_format = { type: 'json_object' }
 
-  let res
+  let res: Response
   try {
     res = await fetch(url, {
       method: 'POST',
@@ -147,10 +176,10 @@ async function completeViaCustom({ cfg, messages, json, signal, onDelta }) {
       signal,
     })
   } catch (err) {
-    if (err && err.name === 'AbortError') throw err
+    if (err && (err as Error).name === 'AbortError') throw err
     // fetch 抛错通常是被跨域拦了 —— 这个原因必须说清楚，否则用户只会看到"加载失败"
     throw new Error(
-      `连不上「${vendor.name}」（可能是地址不对或对方不允许浏览器跨域）：${(err && err.message) || '网络错误'}`
+      `连不上「${vendor.name}」（可能是地址不对或对方不允许浏览器跨域）：${(err as Error)?.message || '网络错误'}`
     )
   }
 
@@ -162,7 +191,7 @@ async function completeViaCustom({ cfg, messages, json, signal, onDelta }) {
 
   const ctype = res.headers?.get?.('content-type') || ''
   if (!res.body || !ctype.includes('text/event-stream')) {
-    const data = await res.json()
+    const data = (await res.json()) as { choices?: { message?: { content?: string } }[] }
     const text = data?.choices?.[0]?.message?.content || ''
     if (!String(text).trim()) throw new Error('模型没有返回内容，请重试')
     if (onDelta) onDelta(text)
@@ -177,7 +206,7 @@ async function completeViaCustom({ cfg, messages, json, signal, onDelta }) {
     const { done, value } = await reader.read()
     if (done) break
     buf += decoder.decode(value, { stream: true })
-    let nl
+    let nl: number
     while ((nl = buf.indexOf('\n')) >= 0) {
       const line = buf.slice(0, nl).trim()
       buf = buf.slice(nl + 1)
@@ -201,7 +230,7 @@ async function completeViaCustom({ cfg, messages, json, signal, onDelta }) {
 }
 
 /** 模型有时会把 JSON 包在 ``` 里或前后带说明文字，这里做宽松解析 */
-function parseJsonLoose(text) {
+function parseJsonLoose(text: string): Record<string, unknown> {
   let s = String(text).trim()
   const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i)
   if (fence) s = fence[1].trim()
@@ -243,19 +272,19 @@ const TODO_SYSTEM = `你是「信息管家」的待办整理助手。
 
 /* --------------------------------------------------------------- 工具函数 */
 
-function today() {
+function today(): string {
   const d = new Date()
-  const p = (n) => String(n).padStart(2, '0')
+  const p = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 }
 
 /** 用户内容一律用围栏 + 截断后再拼进提示词，降低提示词注入与超长输入的影响 */
-function fence(text, limit = 4000) {
+function fence(text: unknown, limit = 4000): string {
   const s = String(text || '').slice(0, limit)
   return `<<<\n${s}\n>>>`
 }
 
-function indexLines(entries, limit = 60) {
+function indexLines(entries: Entry[], limit = 60): string {
   if (!entries || entries.length === 0) return '（暂无已有条目）'
   return entries
     .slice(0, limit)
@@ -267,9 +296,8 @@ function indexLines(entries, limit = 60) {
 
 /**
  * 分析一条记录：分类 + 标题 + 摘要 + 重点 + 行动项 + 标签 + 优先级 + 关联。
- * @returns {Promise<object>} 结构化结果
  */
-export async function analyzeEntry({ rawText, existingEntries }) {
+export async function analyzeEntry({ rawText, existingEntries }: { rawText: string; existingEntries: Entry[] }): Promise<AnalysisResult> {
   const user = `今天的日期是 ${today()}。
 
 【待分析的原始记录】
@@ -297,20 +325,20 @@ ${indexLines(existingEntries)}
 
   const kinds = ['idea', 'material', 'todo', 'note']
   const prios = ['high', 'normal', 'low']
-  const asArray = (v, max) =>
+  const asArray = (v: unknown, max: number) =>
     Array.isArray(v)
       ? v.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim()).slice(0, max)
       : []
 
   return {
-    kind: kinds.includes(raw.kind) ? raw.kind : 'note',
+    kind: (kinds.includes(String(raw.kind)) ? raw.kind : 'note') as AnalysisResult['kind'],
     title: typeof raw.title === 'string' ? raw.title.trim().slice(0, 60) : '',
     summary: typeof raw.summary === 'string' ? raw.summary.trim().slice(0, 200) : '',
     key_points: asArray(raw.key_points, 6),
     action_items: asArray(raw.action_items, 6),
     tags: asArray(raw.tags, 6),
-    priority: prios.includes(raw.priority) ? raw.priority : 'normal',
-    due_date: /^\d{4}-\d{2}-\d{2}$/.test(raw.due_date) ? raw.due_date : null,
+    priority: (prios.includes(String(raw.priority)) ? raw.priority : 'normal') as AnalysisResult['priority'],
+    due_date: /^\d{4}-\d{2}-\d{2}$/.test(String(raw.due_date)) ? String(raw.due_date) : null,
     related_ids: Array.isArray(raw.related_ids)
       ? raw.related_ids.map((n) => Number(n)).filter((n) => Number.isFinite(n)).slice(0, 3)
       : [],
@@ -321,7 +349,19 @@ ${indexLines(existingEntries)}
 /**
  * 基于记录回答提问。记录索引作为上下文一起送进去，命中不了就坦白说没有。
  */
-export async function answerQuestion({ question, entries, history = [], signal, onDelta }) {
+export async function answerQuestion({
+  question,
+  entries,
+  history = [],
+  signal,
+  onDelta,
+}: {
+  question: string
+  entries: Entry[]
+  history?: ChatMessage[]
+  signal?: AbortSignal
+  onDelta?: (delta: string) => void
+}): Promise<string> {
   const context = entries
     .slice(0, 120)
     .map((e) => {
@@ -355,9 +395,8 @@ ${fence(question, 1000)}
 
 /**
  * 生成阶段总结与后续行动建议。
- * @returns {Promise<{summary: string, actions: string[], themes: string[]}>}
  */
-export async function buildReview({ entries, label }) {
+export async function buildReview({ entries, label }: { entries: Entry[]; label: string }): Promise<ReviewResult> {
   const context = entries
     .slice(0, 150)
     .map((e) => {
@@ -381,7 +420,7 @@ ${fence(context, 20000)}
 
   const text = await complete({ system: REVIEW_SYSTEM, user, json: true })
   const raw = parseJsonLoose(text)
-  const asArray = (v, max) =>
+  const asArray = (v: unknown, max: number) =>
     Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim()).slice(0, max) : []
 
   return {
@@ -392,10 +431,10 @@ ${fence(context, 20000)}
 }
 
 /** 整理待办：优先级、可合并项、建议放弃项 */
-export async function tidyTodos({ todos, onDelta }) {
+export async function tidyTodos({ todos, onDelta }: { todos: { title?: string; due_date?: string | null; priority?: string | null }[]; onDelta?: (delta: string) => void }): Promise<string> {
   const list = todos
     .slice(0, 80)
-    .map((t, i) => `${i + 1}. ${t.title || t.text}${t.due_date ? `（截止 ${t.due_date}）` : ''}${t.priority ? `（${t.priority}）` : ''}`)
+    .map((t, i) => `${i + 1}. ${t.title || ''}${t.due_date ? `（截止 ${t.due_date}）` : ''}${t.priority ? `（${t.priority}）` : ''}`)
     .join('\n')
 
   const user = `【当前未完成的待办清单】

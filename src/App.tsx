@@ -148,8 +148,10 @@ function Shell() {
         if (state.phase !== 'app') return // 还没登录，别在看不见的地方改视图
         const panel = document.getElementById('settings-panel')
         if (state.panelOpen || (panel && !panel.classList.contains('hidden'))) return // 面板里的滑杆要用左右键调值
-        if (state.navOpen || document.body.classList.contains('nav-open')) return
-        if (state.railOpen || document.body.classList.contains('rail-open')) return
+        if (state.navOpen) return
+        if (document.body.classList.contains('nav-open')) return
+        if (state.railOpen) return
+        if (document.body.classList.contains('rail-open')) return
         const delta = e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 : -1
         const moved = e.key === 'ArrowUp' || e.key === 'ArrowDown' ? cycleView(delta) : cycleFilter(delta)
         // 只有真的接管了才阻止默认行为：待办 / 问答页没有筛选栏，左右键仍留给页面自己处理

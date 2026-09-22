@@ -66,19 +66,42 @@ jobs:
       - name: WCAG contrast checks
         run: python tools/contrast-check.py
 
-      - name: Validate self-hosted database baseline
+      - name: Validate self-hosted database baseline as non-superuser app role
         env:
           PGPASSWORD: postgres
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq postgresql-client
-          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -f database/001_baseline.sql
+
+          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 <<'SQL'
+          create role pma login password 'pma-ci-password' nosuperuser nocreatedb nocreaterole;
+          SQL
+          createdb -h 127.0.0.1 -U postgres -O pma pma
+
+          test "$(psql -h 127.0.0.1 -U postgres -d postgres -Atc "select rolsuper from pg_roles where rolname='pma'")" = "f"
+
+          PGPASSWORD=pma-ci-password psql             -h 127.0.0.1 -U pma -d pma             -v ON_ERROR_STOP=1             -f database/001_baseline.sql
+
+          BAD_OWNERS=$(PGPASSWORD=pma-ci-password psql -h 127.0.0.1 -U pma -d pma -Atc "
+            select c.relname || ':' || pg_get_userbyid(c.relowner)
+            from pg_class c
+            join pg_namespace n on n.oid = c.relnamespace
+            where n.nspname = 'public'
+              and c.relkind in ('r','p','S')
+              and pg_get_userbyid(c.relowner) <> current_user
+            order by c.relname
+          ")
+          if [ -n "$BAD_OWNERS" ]; then
+            echo "Objects not owned by pma:"
+            echo "$BAD_OWNERS"
+            exit 1
+          fi
 
       - name: Smoke test self-hosted API
         env:
           NODE_ENV: test
           PORT: 3000
-          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+          DATABASE_URL: postgres://pma:pma-ci-password@127.0.0.1:5432/pma
           OTP_PEPPER: ci-only-secret
           PREFERENCES_ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
         run: |

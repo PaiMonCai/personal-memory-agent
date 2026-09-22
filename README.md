@@ -115,6 +115,32 @@ AI_MODELS=model-a,model-b
 
 升级前建议备份数据库。
 
+### 外部 PostgreSQL / 手动初始化
+
+如果不是通过仓库里的 Docker Compose 全新初始化数据库，执行 `database/001_baseline.sql` 时必须使用 **`DATABASE_URL` 中的同一个 PostgreSQL 用户**。
+
+例如应用连接用户是 `pma`：
+
+```bash
+psql "postgres://pma:密码@数据库地址:5432/pma" \
+  -v ON_ERROR_STOP=1 \
+  -f database/001_baseline.sql
+```
+
+不要用 `postgres` 超级用户代替 `pma` 执行基线 SQL，否则表和 identity sequence 会归 `postgres` 所有，后续应用用户可能无法执行 schema upgrade。
+
+应用启动时会检查项目表和 sequence 的 owner；如果 owner 与当前 `DATABASE_URL` 用户不一致，会直接给出明确错误并停止启动。
+
+如果已有数据库已经出现这个问题，可以用数据库管理员执行：
+
+```bash
+psql -U postgres -d pma \
+  -v app_user=pma \
+  -f database/repair_ownership.sql
+```
+
+修复脚本只处理本项目的表及其关联 sequence，并为应用用户补充 `public` schema 的必要权限。
+
 ## HTTPS
 
 生产环境建议设置：
